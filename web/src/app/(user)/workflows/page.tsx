@@ -1,6 +1,6 @@
 "use client";
 
-import { App, Button, Checkbox, Empty, Image, Input, Modal, Select, Switch, Tag, Typography } from "antd";
+import { App, Button, Checkbox, Empty, Image, Input, Modal, Select, Space, Switch, Tag, Typography } from "antd";
 import { Copy, Download, Edit3, FilePlus2, Play, Plus, Sparkles, Trash2, WandSparkles } from "lucide-react";
 import localforage from "localforage";
 import { nanoid } from "nanoid";
@@ -525,7 +525,10 @@ function WorkflowEditorModal({
                         <ToggleRow label="流式传输" checked={workflow.config.streamImages} onChange={(checked) => patchConfig({ streamImages: checked })} />
                         <ToggleRow label="返回 Base64" checked={workflow.config.responseFormatB64Json} onChange={(checked) => patchConfig({ responseFormatB64Json: checked })} />
                         <ToggleRow label="Codex CLI 兼容" checked={workflow.config.codexCli} onChange={(checked) => patchConfig({ codexCli: checked })} />
-                        <Input value={workflow.config.timeout} addonBefore="超时(秒)" onChange={(event) => patchConfig({ timeout: event.target.value })} />
+                        <Space.Compact className="w-full">
+                            <span className="inline-flex h-8 shrink-0 items-center rounded-l-md border border-r-0 border-stone-300 bg-stone-50 px-3 text-xs text-stone-500 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-400">超时(秒)</span>
+                            <Input value={workflow.config.timeout} onChange={(event) => patchConfig({ timeout: event.target.value })} />
+                        </Space.Compact>
                     </div>
                 </aside>
             </div>
@@ -661,7 +664,7 @@ function resolveWorkflowRuntime(workflow: CreativeWorkflow, baseConfig: AiConfig
     const workflowModel = workflow.config.imageModel || workflow.config.model;
     const fallbackModel = baseConfig.imageModel || baseConfig.model;
     if (!workflowModel) return { model: fallbackModel, apiMode: baseConfig.apiMode };
-    if (baseConfig.channelMode === "remote" && baseConfig.models.length && !baseConfig.models.includes(workflowModel)) {
+    if (baseConfig.channelMode === "remote" && workflowModel !== fallbackModel && (!baseConfig.models.length || !baseConfig.models.includes(workflowModel))) {
         return { model: fallbackModel, apiMode: baseConfig.apiMode };
     }
     return { model: workflowModel, apiMode: workflow.config.apiMode || baseConfig.apiMode };
