@@ -42,6 +42,7 @@
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
 | `availableModels` | string[] | 系统可用模型，由管理员手动选择；页面下拉选项可来自私有渠道模型 |
+| `channels` | object[] | 已启用私有渠道的脱敏摘要，供前端展示渠道名称、地址和模型数量，不包含 API Key |
 | `modelCosts` | object[] | 模型算力点配置，后端模型接口调用前按模型预扣，上游失败时返还；未配置默认不扣除 |
 | `defaultModel` | string | 默认模型，从 `availableModels` 中选择 |
 | `defaultImageModel` | string | 默认图片模型，从 `availableModels` 中选择 |
@@ -82,6 +83,7 @@
       "apiKey": "sk-xxx",
       "models": ["gpt-5.5", "gpt-image-2"],
       "weight": 1,
+      "timeout": 600,
       "enabled": true,
       "remark": ""
     }
@@ -108,10 +110,11 @@
 | `apiKey` | string | 渠道密钥 |
 | `models` | string[] | 该渠道可用模型 |
 | `weight` | number | 渠道权重；同一模型有多个可用渠道时按权重随机 |
+| `timeout` | number | 上游请求超时时间，单位秒，默认 600 |
 | `enabled` | boolean | 是否启用 |
 | `remark` | string | 备注 |
 
-后端调用模型时，会从已启用、已配置 `baseUrl` 和 `apiKey`、且 `models` 包含目标模型的渠道中选择一个。
+后端调用模型时，会从已启用、已配置 `baseUrl` 和 `apiKey`、且 `models` 包含目标模型的渠道中选择一个。后端代理支持 OpenAI 兼容的 `/v1/images/*`、`/v1/responses`、`/v1/chat/completions` 和视频相关路径。
 
 `promptSync` 字段：
 

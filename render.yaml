@@ -15,7 +15,7 @@ services:
       - key: JWT_EXPIRE_HOURS
         value: 168
       - key: PORT
-        value: 3000
+        value: 13000
       - key: STORAGE_DRIVER
         value: sqlite
       - key: DATABASE_DSN

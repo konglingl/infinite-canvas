@@ -25,12 +25,17 @@ export type CanvasNodeMetadata = {
     prompt?: string;
     status?: CanvasNodeStatus;
     errorDetails?: string;
+    startedAt?: number;
+    durationMs?: number;
     fontSize?: number;
     generationMode?: CanvasGenerationMode;
     generationType?: CanvasImageGenerationType;
     model?: string;
     size?: string;
     quality?: string;
+    outputFormat?: "png" | "jpeg" | "webp";
+    outputCompression?: string;
+    moderation?: "auto" | "low";
     count?: number;
     seconds?: string;
     vquality?: string;

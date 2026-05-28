@@ -11,16 +11,26 @@ export type AiConfig = {
     channelMode: "remote" | "local";
     baseUrl: string;
     apiKey: string;
+    apiMode: "images" | "responses";
     model: string;
     imageModel: string;
     videoModel: string;
     textModel: string;
+    timeout: string;
+    streamImages: boolean;
+    streamPartialImages: string;
+    responseFormatB64Json: boolean;
+    codexCli: boolean;
     videoSeconds: string;
     vquality: string;
     systemPrompt: string;
     models: string[];
+    publicChannels: AdminPublicSettings["modelChannel"]["channels"];
     quality: string;
     size: string;
+    outputFormat: "png" | "jpeg" | "webp";
+    outputCompression: string;
+    moderation: "auto" | "low";
     count: string;
 };
 
@@ -30,16 +40,26 @@ export const defaultConfig: AiConfig = {
     channelMode: "local",
     baseUrl: "https://api.openai.com",
     apiKey: "",
+    apiMode: "images",
     model: "gpt-image-2",
     imageModel: "gpt-image-2",
     videoModel: "grok-imagine-video",
     textModel: "gpt-5.5",
+    timeout: "600",
+    streamImages: false,
+    streamPartialImages: "1",
+    responseFormatB64Json: true,
+    codexCli: false,
     videoSeconds: "6",
     vquality: "720",
     systemPrompt: "",
     models: [],
+    publicChannels: [],
     quality: "auto",
     size: "1:1",
+    outputFormat: "png",
+    outputCompression: "100",
+    moderation: "auto",
     count: "1",
 };
 
@@ -66,6 +86,7 @@ function resolveEffectiveConfig(config: AiConfig, modelChannel: AdminPublicSetti
         ...config,
         channelMode,
         models,
+        publicChannels: modelChannel.channels || [],
         model: models.includes(config.model) ? config.model : fallbackModel,
         imageModel: models.includes(config.imageModel) ? config.imageModel : modelChannel.defaultImageModel || fallbackModel,
         videoModel: models.includes(config.videoModel) ? config.videoModel : modelChannel.defaultVideoModel || fallbackModel,
@@ -112,7 +133,25 @@ export const useConfigStore = create<ConfigStore>()(
             partialize: (state) => ({ config: state.config }),
             merge: (persisted, current) => {
                 const config = { ...defaultConfig, ...((persisted as Partial<ConfigStore>).config || {}) };
-                return { ...current, config: { ...config, channelMode: config.channelMode || "remote", imageModel: config.imageModel || config.model, videoModel: config.videoModel || "grok-imagine-video", textModel: config.textModel || config.model, videoSeconds: config.videoSeconds || "6", vquality: config.vquality || "720" } };
+                return {
+                    ...current,
+                    config: {
+                        ...config,
+                        channelMode: config.channelMode || "remote",
+                        apiMode: config.apiMode === "responses" ? "responses" : "images",
+                        imageModel: config.imageModel || config.model,
+                        videoModel: config.videoModel || "grok-imagine-video",
+                        textModel: config.textModel || config.model,
+                        timeout: config.timeout || "600",
+                        streamPartialImages: config.streamPartialImages || "1",
+                        responseFormatB64Json: config.responseFormatB64Json !== false,
+                        outputFormat: ["jpeg", "webp"].includes(config.outputFormat) ? config.outputFormat : "png",
+                        outputCompression: config.outputCompression || "100",
+                        moderation: config.moderation === "low" ? "low" : "auto",
+                        videoSeconds: config.videoSeconds || "6",
+                        vquality: config.vquality || "720",
+                    },
+                };
             },
         },
     ),

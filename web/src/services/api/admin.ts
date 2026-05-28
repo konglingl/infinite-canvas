@@ -36,6 +36,7 @@ export type AdminUserListResponse = {
 export type AdminCreditLog = {
     id: string;
     userId: string;
+    userDisplayName: string;
     type: string;
     amount: number;
     balance: number;
@@ -163,6 +164,7 @@ export type AdminModelChannel = {
     apiKey: string;
     models: string[];
     weight: number;
+    timeout: number;
     enabled: boolean;
     remark: string;
 };
@@ -170,12 +172,23 @@ export type AdminModelChannel = {
 export type AdminPublicModelChannelSettings = {
     availableModels: string[];
     modelCosts: AdminModelCost[];
+    channels: AdminPublicModelChannelInfo[];
     defaultModel: string;
     defaultImageModel: string;
     defaultVideoModel: string;
     defaultTextModel: string;
     systemPrompt: string;
     allowCustomChannel: boolean;
+};
+
+export type AdminPublicModelChannelInfo = {
+    name: string;
+    baseUrl: string;
+    models: string[];
+    weight: number;
+    timeout: number;
+    enabled: boolean;
+    remark: string;
 };
 
 export type AdminModelCost = {

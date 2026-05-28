@@ -1,12 +1,12 @@
 "use client";
 
-import { BookOpen, CheckSquare, ClipboardPaste, Download, FolderPlus, History, ImagePlus, LoaderCircle, PenLine, Plus, SlidersHorizontal, Sparkles, Trash2, Upload } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
-import { App, Button, Checkbox, Drawer, Empty, Image, Input, Modal, Tag, Typography } from "antd";
+import { AlertCircle, BookOpen, CheckSquare, ChevronDown, ChevronUp, ClipboardPaste, Copy, Download, FolderPlus, History, ImagePlus, LoaderCircle, PanelBottom, PanelLeft, PenLine, Plus, RotateCcw, Sparkles, Trash2, Upload } from "lucide-react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { App, Button, Checkbox, Empty, Image, Input, Modal, Tag, Typography } from "antd";
 import localforage from "localforage";
 import { saveAs } from "file-saver";
 
-import { ImageSettingsPanel } from "@/components/image-settings-panel";
+import { ImageSettingsPanel, imageFormatLabel, imageQualityLabel, imageSizeLabel } from "@/components/image-settings-panel";
 import { ModelPicker } from "@/components/model-picker";
 import { PromptSelectDialog } from "@/components/prompts/prompt-select-dialog";
 import { AssetPickerModal, type InsertAssetPayload } from "@/app/(user)/canvas/components/asset-picker-modal";
@@ -34,8 +34,14 @@ type GeneratedImage = {
 type GenerationResult = {
     id: string;
     status: "pending" | "success" | "failed";
+    createdAt: number;
+    prompt: string;
+    model: string;
+    config: GenerationLogConfig;
+    references: ReferenceImage[];
     image?: GeneratedImage;
     error?: string;
+    durationMs?: number;
 };
 
 type GenerationLog = {
@@ -56,17 +62,30 @@ type GenerationLog = {
     status: "成功" | "失败";
     images: GeneratedImage[];
     thumbnails: string[];
+    errors: string[];
+    categoryIds: string[];
 };
 
-type GenerationLogConfig = Pick<AiConfig, "model" | "imageModel" | "quality" | "size" | "count">;
+type GenerationLogConfig = Pick<AiConfig, "model" | "imageModel" | "quality" | "size" | "count" | "apiMode" | "outputFormat" | "outputCompression" | "moderation" | "timeout" | "streamImages" | "streamPartialImages" | "responseFormatB64Json" | "codexCli">;
+type RequestSnapshot = { text: string; requestConfig: AiConfig; displayConfig: GenerationLogConfig; references: ReferenceImage[] };
+type GenerationCategory = { id: string; name: string; createdAt: number };
+type ResultViewMode = "all" | "category";
 
 type UpdateAiConfig = <K extends keyof AiConfig>(key: K, value: AiConfig[K]) => void;
+type WorkbenchLayout = "side" | "bottom";
+type CollapsibleSectionKey = "prompt" | "references" | "settings";
+type CollapsedSections = Record<CollapsibleSectionKey, boolean>;
 
 const LOG_STORE_KEY = "infinite-canvas:image_generation_logs";
+const CATEGORY_STORE_KEY = "infinite-canvas:image_generation_categories";
+const WORKBENCH_LAYOUT_KEY = "infinite-canvas:image-workbench-layout";
+const RESULT_VIEW_MODE_KEY = "infinite-canvas:image-result-view-mode";
 const logStore = localforage.createInstance({ name: "infinite-canvas", storeName: "image_generation_logs" });
+const categoryStore = localforage.createInstance({ name: "infinite-canvas", storeName: "image_generation_categories" });
+const defaultCollapsedSections: CollapsedSections = { prompt: false, references: true, settings: true };
 
 export default function ImagePage() {
-    const { message } = App.useApp();
+    const { message, modal } = App.useApp();
     const fileInputRef = useRef<HTMLInputElement>(null);
     const config = useConfigStore((state) => state.config);
     const effectiveConfig = useEffectiveConfig();
@@ -78,30 +97,63 @@ export default function ImagePage() {
     const [references, setReferences] = useState<ReferenceImage[]>([]);
     const [results, setResults] = useState<GenerationResult[]>([]);
     const [logs, setLogs] = useState<GenerationLog[]>([]);
-    const [running, setRunning] = useState(false);
-    const [logsOpen, setLogsOpen] = useState(false);
-    const [settingsOpen, setSettingsOpen] = useState(false);
+    const [categories, setCategories] = useState<GenerationCategory[]>([]);
+    const [resultViewMode, setResultViewModeState] = useState<ResultViewMode>("all");
+    const [activeResultCategoryId, setActiveResultCategoryId] = useState<string | null>(null);
+    const [workbenchLayout, setWorkbenchLayoutState] = useState<WorkbenchLayout>("side");
+    const [collapsedSections, setCollapsedSections] = useState<CollapsedSections>(defaultCollapsedSections);
     const [promptDialogOpen, setPromptDialogOpen] = useState(false);
     const [assetPickerOpen, setAssetPickerOpen] = useState(false);
-    const [startedAt, setStartedAt] = useState(0);
-    const [elapsedMs, setElapsedMs] = useState(0);
     const [selectedLogIds, setSelectedLogIds] = useState<string[]>([]);
     const [previewLog, setPreviewLog] = useState<GenerationLog | null>(null);
     const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+    const [now, setNow] = useState(Date.now());
 
     const model = effectiveConfig.imageModel || effectiveConfig.model;
     const canGenerate = Boolean(prompt.trim());
     const generationCount = Math.max(1, Math.min(10, Number(config.count) || 1));
-
-    useEffect(() => {
-        if (!running || !startedAt) return;
-        const timer = window.setInterval(() => setElapsedMs(performance.now() - startedAt), 1000);
-        return () => window.clearInterval(timer);
-    }, [running, startedAt]);
+    const pendingCount = results.filter((item) => item.status === "pending").length;
 
     useEffect(() => {
         void refreshLogs();
+        void refreshCategories();
+        try {
+            const storedLayout = window.localStorage?.getItem(WORKBENCH_LAYOUT_KEY);
+            if (storedLayout === "side" || storedLayout === "bottom") setWorkbenchLayoutState(storedLayout);
+            const storedViewMode = window.localStorage?.getItem(RESULT_VIEW_MODE_KEY);
+            if (storedViewMode === "all" || storedViewMode === "category") setResultViewModeState(storedViewMode);
+        } catch {
+            // Local storage can be unavailable in restricted browser contexts.
+        }
     }, []);
+
+    useEffect(() => {
+        if (!pendingCount) return;
+        const timer = window.setInterval(() => setNow(Date.now()), 1000);
+        return () => window.clearInterval(timer);
+    }, [pendingCount]);
+
+    const setWorkbenchLayout = (layout: WorkbenchLayout) => {
+        setWorkbenchLayoutState(layout);
+        try {
+            window.localStorage?.setItem(WORKBENCH_LAYOUT_KEY, layout);
+        } catch {
+            // Keep the in-memory layout even when persistence is unavailable.
+        }
+    };
+
+    const setResultViewMode = (mode: ResultViewMode) => {
+        setResultViewModeState(mode);
+        try {
+            window.localStorage?.setItem(RESULT_VIEW_MODE_KEY, mode);
+        } catch {
+            // Keep current view in memory if persistence is blocked.
+        }
+    };
+
+    const toggleCollapsedSection = (section: CollapsibleSectionKey) => {
+        setCollapsedSections((value) => ({ ...value, [section]: !value[section] }));
+    };
 
     const addReferences = async (files?: FileList | null) => {
         const imageFiles = Array.from(files || []).filter((file) => file.type.startsWith("image/"));
@@ -135,59 +187,86 @@ export default function ImagePage() {
         }
     };
 
-    const generate = async () => {
-        const text = prompt.trim();
-        if (!text) {
-            message.error("请输入生图提示词");
-            return;
+    const pastePromptFromClipboard = async () => {
+        try {
+            const text = (await navigator.clipboard.readText()).trim();
+            if (!text) {
+                message.error("剪切板里没有可读取的文本");
+                return;
+            }
+            setPrompt(text);
+            setCollapsedSections((value) => ({ ...value, prompt: false }));
+            message.success("已读取剪切板文本");
+        } catch {
+            message.error("剪切板里没有可读取的文本");
         }
-        if (!isAiConfigReady(effectiveConfig, model)) {
-            message.warning("请先完成配置");
-            openConfigDialog(true);
-            return;
-        }
+    };
 
+    const clearPrompt = () => {
+        setPrompt("");
+        setCollapsedSections((value) => ({ ...value, prompt: false }));
+    };
+
+    const generate = async () => {
         const snapshot = buildRequestSnapshot();
         if (!snapshot) return;
+        setPrompt("");
+        setCollapsedSections((value) => ({ ...value, prompt: false }));
+        await submitGenerationBatch(snapshot);
+    };
 
-        setElapsedMs(0);
-        setRunning(true);
+    const retryLog = async (log: GenerationLog) => {
+        const snapshot = buildRequestSnapshot({ promptText: log.prompt, referenceItems: log.references });
+        if (!snapshot) return;
+        await submitGenerationBatch(snapshot);
+    };
+
+    const submitGenerationBatch = async (snapshot: RequestSnapshot) => {
         setPreviewLog(null);
-        setResults(Array.from({ length: generationCount }, () => ({ id: nanoid(), status: "pending" })));
+        const taskCount = Math.max(1, Number(snapshot.displayConfig.count) || 1);
+        const taskIds = Array.from({ length: taskCount }, () => nanoid());
+        const pendingTasks = taskIds.map((id) => createPendingResult(id, snapshot));
+        setResults((value) => [...pendingTasks, ...value]);
+        setNow(Date.now());
         const batchStartedAt = performance.now();
-        setStartedAt(batchStartedAt);
 
-        const tasks = Array.from({ length: generationCount }, (_, index) => runGenerationSlot(index, snapshot));
+        const tasks = taskIds.map((id) => runGenerationTask(id, snapshot).then((image) => ({ resultId: id, image })));
 
         const result = await Promise.allSettled(tasks);
-        const successImages = result.filter((item): item is PromiseFulfilledResult<GeneratedImage> => item.status === "fulfilled").map((item) => item.value);
-        const successCount = successImages.length;
-        const failCount = generationCount - successCount;
+        const successItems = result.filter((item): item is PromiseFulfilledResult<{ resultId: string; image: GeneratedImage }> => item.status === "fulfilled").map((item) => item.value);
+        const successCount = successItems.length;
+        const failCount = taskCount - successCount;
         const failed = result.find((item): item is PromiseRejectedResult => item.status === "rejected");
+        const errors = result.filter((item): item is PromiseRejectedResult => item.status === "rejected").map((item) => (item.reason instanceof Error ? item.reason.message : "生成失败"));
 
         try {
             const logImages = await Promise.all(
-                successImages.map(async (image) => {
+                successItems.map(async ({ resultId, image }) => {
                     const stored = await uploadImage(image.dataUrl);
-                    return { ...image, dataUrl: stored.url, storageKey: stored.storageKey, width: stored.width, height: stored.height, bytes: stored.bytes, mimeType: stored.mimeType };
+                    const durableImage = { ...image, storageKey: stored.storageKey, width: stored.width, height: stored.height, bytes: stored.bytes, mimeType: stored.mimeType };
+                    setResults((value) => updateResult(value, resultId, { image: durableImage }));
+                    return durableImage;
                 }),
             );
-            saveLog(
+            await saveLog(
                 buildLog({
-                    prompt: text,
-                    model,
-                    config: { ...snapshot.config, count: String(generationCount) },
+                    prompt: snapshot.text,
+                    model: snapshot.displayConfig.imageModel || snapshot.displayConfig.model,
+                    config: snapshot.displayConfig,
                     references: snapshot.references,
                     durationMs: performance.now() - batchStartedAt,
                     successCount,
                     failCount,
                     status: successCount ? "成功" : "失败",
                     images: logImages,
+                    errors,
+                    categoryIds: activeResultCategoryId ? [activeResultCategoryId] : [],
                 }),
             );
+            setResults((value) => value.filter((item) => !taskIds.includes(item.id)));
             successCount ? message.success("图片已生成") : message.error(failed?.reason instanceof Error ? failed.reason.message : "生成失败");
-        } finally {
-            setRunning(false);
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : "保存生成记录失败");
         }
     };
 
@@ -218,9 +297,11 @@ export default function ImagePage() {
     const insertPickedAsset = async (payload: InsertAssetPayload) => {
         if (payload.kind === "text") {
             setPrompt(payload.content);
-        } else {
+        } else if (payload.kind === "image") {
             const stored = await uploadImage(payload.dataUrl);
             setReferences((value) => [...value, { id: nanoid(), name: payload.title, type: stored.mimeType, dataUrl: stored.url, storageKey: stored.storageKey }]);
+        } else {
+            message.warning("视频素材不能作为生图参考图");
         }
         setAssetPickerOpen(false);
     };
@@ -228,9 +309,7 @@ export default function ImagePage() {
     const createSession = () => {
         setPrompt("");
         setReferences([]);
-        setResults([]);
-        setElapsedMs(0);
-        setStartedAt(0);
+        setResults((value) => value.filter((item) => item.status === "pending"));
         setSelectedLogIds([]);
         setPreviewLog(null);
     };
@@ -240,32 +319,124 @@ export default function ImagePage() {
         void Promise.all([deleteStoredImages(imageKeys), ...selectedLogIds.map((id) => logStore.removeItem(id))]).then(refreshLogs);
         if (previewLog && selectedLogIds.includes(previewLog.id)) {
             setPreviewLog(null);
-            setResults([]);
+            setResults((value) => value.filter((item) => item.status === "pending"));
         }
         setSelectedLogIds([]);
         setDeleteConfirmOpen(false);
     };
 
-    const saveLog = (log: GenerationLog) => {
-        void logStore.setItem(log.id, serializeLog(log)).then(refreshLogs);
+    const deleteLog = (log: GenerationLog) => {
+        modal.confirm({
+            title: "删除生成结果",
+            content: "确定删除这条生成结果吗？",
+            okText: "删除",
+            cancelText: "取消",
+            okButtonProps: { danger: true },
+            onOk: async () => {
+                const imageKeys = log.images.map((image) => image.storageKey).filter((key): key is string => Boolean(key));
+                await Promise.all([deleteStoredImages(imageKeys), logStore.removeItem(log.id)]);
+                setSelectedLogIds((value) => value.filter((id) => id !== log.id));
+                if (previewLog?.id === log.id) setPreviewLog(null);
+                await refreshLogs();
+            },
+        });
+    };
+
+    const saveLog = async (log: GenerationLog) => {
+        setLogs((value) => [log, ...value.filter((item) => item.id !== log.id)]);
+        await logStore.setItem(log.id, serializeLog(log));
+        await refreshLogs();
     };
 
     const refreshLogs = async () => setLogs(await readStoredLogs());
+    const refreshCategories = async () => setCategories(await readStoredCategories());
+
+    const createCategory = async (name: string) => {
+        const trimmedName = name.trim();
+        if (!trimmedName) {
+            message.error("请输入分类名称");
+            return null;
+        }
+        const existing = categories.find((item) => item.name === trimmedName);
+        if (existing) return existing;
+        const nextCategory = { id: nanoid(), name: trimmedName, createdAt: Date.now() };
+        const nextCategories = [...categories, nextCategory];
+        setCategories(nextCategories);
+        await categoryStore.setItem(CATEGORY_STORE_KEY, nextCategories);
+        return nextCategory;
+    };
+
+    const renameCategory = async (category: GenerationCategory, name: string) => {
+        const trimmedName = name.trim();
+        if (!trimmedName) {
+            message.error("请输入分类名称");
+            return;
+        }
+        const nextCategories = categories.map((item) => (item.id === category.id ? { ...item, name: trimmedName } : item));
+        setCategories(nextCategories);
+        await categoryStore.setItem(CATEGORY_STORE_KEY, nextCategories);
+        message.success("已重命名分类");
+    };
+
+    const deleteCategory = (category: GenerationCategory) => {
+        modal.confirm({
+            title: "删除分类",
+            content: `确定删除分类「${category.name}」吗？分类内的生成结果会移至未分类。`,
+            okText: "删除",
+            cancelText: "取消",
+            okButtonProps: { danger: true },
+            onOk: async () => {
+                const nextCategories = categories.filter((item) => item.id !== category.id);
+                const nextLogs = logs.map((log) => ({ ...log, categoryIds: log.categoryIds.filter((id) => id !== category.id) }));
+                setCategories(nextCategories);
+                setLogs(nextLogs);
+                await categoryStore.setItem(CATEGORY_STORE_KEY, nextCategories);
+                await Promise.all(nextLogs.map((log) => logStore.setItem(log.id, serializeLog(log))));
+                message.success("已删除分类");
+            },
+        });
+    };
+
+    const updateLogCategories = async (log: GenerationLog, categoryIds: string[]) => {
+        const nextLog = { ...log, categoryIds };
+        setLogs((value) => value.map((item) => (item.id === log.id ? nextLog : item)));
+        await logStore.setItem(log.id, serializeLog(nextLog));
+        await refreshLogs();
+        message.success(categoryIds.length ? "已更新分类" : "已移至未分类");
+    };
+
+    const toggleLogCategory = async (log: GenerationLog, categoryId: string) => {
+        const nextCategoryIds = log.categoryIds.includes(categoryId) ? log.categoryIds.filter((id) => id !== categoryId) : [...log.categoryIds, categoryId];
+        await updateLogCategories(log, nextCategoryIds);
+    };
 
     const previewGenerationLog = async (log: GenerationLog) => {
         setPreviewLog(log);
-        setLogsOpen(false);
         setPrompt(log.prompt);
         setReferences(log.references || []);
+        setCollapsedSections((value) => ({ ...value, prompt: false, references: !log.references?.length }));
         if (log.config.imageModel || log.model) updateConfig("imageModel", log.config.imageModel || log.model);
         if (log.config.quality) updateConfig("quality", log.config.quality);
         if (log.config.size) updateConfig("size", log.config.size);
         if (log.config.count) updateConfig("count", log.config.count);
-        setResults(log.images.map((image) => ({ id: image.id, status: "success", image })));
+        if (log.config.apiMode) updateConfig("apiMode", log.config.apiMode);
+        if (log.config.outputFormat) updateConfig("outputFormat", log.config.outputFormat);
+        if (log.config.outputCompression) updateConfig("outputCompression", log.config.outputCompression);
+        if (log.config.moderation) updateConfig("moderation", log.config.moderation);
+        if (log.config.timeout) updateConfig("timeout", log.config.timeout);
+        if (typeof log.config.streamImages === "boolean") updateConfig("streamImages", log.config.streamImages);
+        if (log.config.streamPartialImages) updateConfig("streamPartialImages", log.config.streamPartialImages);
+        if (typeof log.config.responseFormatB64Json === "boolean") updateConfig("responseFormatB64Json", log.config.responseFormatB64Json);
+        if (typeof log.config.codexCli === "boolean") updateConfig("codexCli", log.config.codexCli);
     };
 
-    const buildRequestSnapshot = () => {
-        const text = prompt.trim();
+    const copyPrompt = async (text: string) => {
+        await navigator.clipboard.writeText(text);
+        message.success("提示词已复制");
+    };
+
+    const buildRequestSnapshot = ({ promptText = prompt, referenceItems = references, taskCount = generationCount }: { promptText?: string; referenceItems?: ReferenceImage[]; taskCount?: number } = {}) => {
+        const text = promptText.trim();
         if (!text) {
             message.error("请输入生图提示词");
             return null;
@@ -275,167 +446,154 @@ export default function ImagePage() {
             openConfigDialog(true);
             return null;
         }
-        return { text, config: { ...effectiveConfig, model, count: "1" }, references: [...references] };
+        return {
+            text,
+            requestConfig: { ...effectiveConfig, model, count: "1" },
+            displayConfig: buildGenerationLogConfig({ ...effectiveConfig, model, count: String(taskCount) }),
+            references: [...referenceItems],
+        };
     };
 
-    const runGenerationSlot = async (index: number, snapshot: { text: string; config: AiConfig; references: ReferenceImage[] }) => {
+    const runGenerationTask = async (resultId: string, snapshot: RequestSnapshot) => {
         const itemStartedAt = performance.now();
         try {
-            const result = snapshot.references.length ? await requestEdit(snapshot.config, snapshot.text, snapshot.references) : await requestGeneration(snapshot.config, snapshot.text);
+            const result = snapshot.references.length ? await requestEdit(snapshot.requestConfig, snapshot.text, snapshot.references) : await requestGeneration(snapshot.requestConfig, snapshot.text);
             const image = result[0];
             if (!image) throw new Error("接口没有返回图片");
             const meta = await readImageMeta(image.dataUrl);
-            const nextImage = { id: image.id, dataUrl: image.dataUrl, durationMs: performance.now() - itemStartedAt, width: meta.width, height: meta.height, bytes: getDataUrlByteSize(image.dataUrl) };
-            setResults((value) => updateResultAt(value, index, { status: "success", image: nextImage }));
+            const nextImage: GeneratedImage = { id: image.id, dataUrl: image.dataUrl, durationMs: performance.now() - itemStartedAt, width: meta.width, height: meta.height, bytes: getDataUrlByteSize(image.dataUrl), mimeType: meta.mimeType };
+            setResults((value) => updateResult(value, resultId, { status: "success", image: nextImage, durationMs: nextImage.durationMs }));
             return nextImage;
         } catch (error) {
-            setResults((value) => updateResultAt(value, index, { status: "failed", error: error instanceof Error ? error.message : "生成失败" }));
+            setResults((value) => updateResult(value, resultId, { status: "failed", error: error instanceof Error ? error.message : "生成失败", durationMs: performance.now() - itemStartedAt }));
             throw error;
         }
     };
 
-    const retryResult = (index: number) => {
-        const snapshot = buildRequestSnapshot();
+    const retryResult = (result: GenerationResult) => {
+        const snapshot = buildRequestSnapshot({ promptText: result.prompt, referenceItems: result.references, taskCount: 1 });
         if (!snapshot) return;
-        setPreviewLog(null);
-        setResults((value) => updateResultAt(value, index, { status: "pending", error: undefined, image: undefined }));
-        void runGenerationSlot(index, snapshot).catch(() => {});
+        setResults((value) => value.filter((item) => item.id !== result.id));
+        void submitGenerationBatch(snapshot);
     };
 
     return (
         <div className="flex h-full flex-col overflow-hidden bg-stone-50 text-stone-900 dark:bg-stone-950 dark:text-stone-100">
-            <main className="grid min-h-0 flex-1 grid-cols-1 gap-3 overflow-y-auto p-3 lg:grid-cols-[300px_minmax(0,1fr)] lg:overflow-hidden xl:grid-cols-[320px_minmax(0,1fr)]">
-                <aside className="thin-scrollbar hidden min-h-0 overflow-y-auto rounded-lg border border-stone-200 bg-card p-4 shadow-sm dark:border-stone-800 lg:block">
-                    <LogPanel
-                        logs={logs}
-                        selectedLogIds={selectedLogIds}
-                        activeLogId={previewLog?.id}
-                        onSelectedLogIdsChange={setSelectedLogIds}
-                        onCreateSession={createSession}
-                        onDeleteSelected={() => setDeleteConfirmOpen(true)}
-                        onPreviewLog={(log) => void previewGenerationLog(log)}
-                    />
-                </aside>
-
-                <section className="grid gap-3 lg:min-h-0 lg:overflow-hidden xl:grid-cols-[420px_minmax(0,1fr)]">
-                    <div className="thin-scrollbar flex flex-col rounded-lg border border-stone-200 bg-card p-4 shadow-sm dark:border-stone-800 lg:min-h-0 lg:overflow-y-auto">
-                        <div>
-                            <div className="flex items-start justify-between gap-3">
-                                <div className="min-w-0">
-                                    <h1 className="text-2xl font-semibold text-stone-950 dark:text-stone-100">生图工作台</h1>
-                                </div>
-                                <div className="flex shrink-0 gap-2 lg:hidden">
-                                    <Button icon={<History className="size-4" />} onClick={() => setLogsOpen(true)}>
-                                        记录
-                                    </Button>
-                                    <Button icon={<SlidersHorizontal className="size-4" />} onClick={() => setSettingsOpen(true)}>
-                                        参数
-                                    </Button>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div className="mt-6 space-y-5">
-                            <div>
-                                <div className="mb-2 flex items-center justify-between gap-3">
-                                    <span className="text-base font-semibold">提示词</span>
-                                    <div className="flex gap-2">
-                                        <Button size="small" icon={<BookOpen className="size-3.5" />} onClick={() => setPromptDialogOpen(true)}>
-                                            查看提示词库
-                                        </Button>
-                                        <Button size="small" icon={<FolderPlus className="size-3.5" />} onClick={() => setAssetPickerOpen(true)}>
-                                            查看我的素材
-                                        </Button>
-                                    </div>
-                                </div>
-                                <Input.TextArea value={prompt} onChange={(event) => setPrompt(event.target.value)} rows={7} placeholder="描述画面主体、风格、构图、光线和用途" />
-                            </div>
-
-                            <div className="min-w-0">
-                                <div className="mb-2 flex items-center justify-between gap-3">
-                                    <span className="text-base font-semibold">参考图</span>
-                                    <div className="flex gap-2">
-                                        <Button size="small" icon={<ClipboardPaste className="size-3.5" />} onClick={() => void addReferencesFromClipboard()}>
-                                            剪切板
-                                        </Button>
-                                        <Button size="small" icon={<Upload className="size-3.5" />} onClick={() => fileInputRef.current?.click()}>
-                                            上传
-                                        </Button>
-                                    </div>
-                                </div>
-                                <div
-                                    className="hover-scrollbar hover-scrollbar-hint flex min-h-24 w-full min-w-0 max-w-full gap-2 overflow-x-scroll overflow-y-hidden rounded-lg border border-dashed border-stone-300 p-2 pb-3 overscroll-x-contain dark:border-stone-700"
-                                    onWheel={(event) => {
-                                        if (event.currentTarget.scrollWidth <= event.currentTarget.clientWidth) return;
-                                        event.preventDefault();
-                                        event.currentTarget.scrollLeft += event.deltaY;
-                                    }}
-                                >
-                                    {references.map((item) => (
-                                        <div key={item.id} className="group relative size-20 shrink-0 overflow-hidden rounded-md border border-stone-200 dark:border-stone-800">
-                                            <img src={item.dataUrl} alt={item.name} className="size-full object-cover" />
-                                            <button
-                                                type="button"
-                                                className="absolute right-1 top-1 hidden size-6 items-center justify-center rounded bg-black/60 text-white group-hover:flex"
-                                                onClick={() => setReferences((value) => value.filter((ref) => ref.id !== item.id))}
-                                                aria-label="移除参考图"
-                                            >
-                                                <Trash2 className="size-3.5" />
-                                            </button>
-                                        </div>
-                                    ))}
-                                    {!references.length ? <div className="flex min-w-full items-center justify-center text-sm text-stone-500">暂无参考图</div> : null}
-                                </div>
-                            </div>
-
-                            <div className="flex items-center justify-between rounded-lg border border-stone-200 bg-stone-50 px-3 py-2 text-sm dark:border-stone-800 dark:bg-stone-900 sm:hidden">
-                                <span className="truncate text-stone-500 dark:text-stone-400">
-                                    {model} · {effectiveConfig.size} · {effectiveConfig.quality}
-                                </span>
-                                <Button size="small" type="text" icon={<SlidersHorizontal className="size-4" />} onClick={() => setSettingsOpen(true)}>
-                                    调整
-                                </Button>
-                            </div>
-
-                            <div className="hidden gap-4 sm:grid sm:grid-cols-2">
-                                <GenerationSettings config={effectiveConfig} model={model} updateConfig={updateConfig} openConfigDialog={openConfigDialog} />
-                            </div>
-                        </div>
-
-                        <div className="mt-auto pt-6">
-                            <Button type="primary" size="large" block icon={<Sparkles className="size-4" />} loading={running} disabled={!canGenerate || running} onClick={() => void generate()}>
-                                开始生成
-                            </Button>
-                        </div>
-                    </div>
-
-                    <div className="thin-scrollbar rounded-lg border border-stone-200 bg-card p-4 shadow-sm dark:border-stone-800 lg:min-h-0 lg:overflow-y-auto lg:p-5">
-                        <div className="mb-4 flex items-center justify-between gap-3">
-                            <div>
-                                <h2 className="text-xl font-semibold">生成结果</h2>
-                            </div>
-                            {running ? <Tag className="m-0 px-2 py-1">等待 {formatDuration(elapsedMs)}</Tag> : null}
-                        </div>
-                        {results.length ? (
-                            <div className="grid gap-4 sm:grid-cols-2 2xl:grid-cols-3">
-                                {results.map((result, index) =>
-                                    result.status === "success" && result.image ? (
-                                        <ResultImageCard key={result.id} image={result.image} index={index} onEdit={addResultToReferences} onDownload={downloadImage} onSaveAsset={saveResultToAssets} />
-                                    ) : result.status === "failed" ? (
-                                        <FailedImageCard key={result.id} error={result.error || "生成失败"} onRetry={() => retryResult(index)} />
-                                    ) : (
-                                        <PendingImageCard key={result.id} />
-                                    ),
-                                )}
-                            </div>
-                        ) : (
-                            <div className="flex min-h-[320px] flex-col items-center justify-center rounded-lg border border-dashed border-stone-300 text-center dark:border-stone-700 lg:min-h-[560px]">
-                                <ImagePlus className="mb-4 size-11 text-stone-400" />
-                                <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="还没有生成图片" />
-                            </div>
-                        )}
-                    </div>
-                </section>
+            <main className={`${workbenchLayout === "side" ? "grid grid-cols-1 lg:grid-cols-[420px_minmax(0,1fr)]" : "relative flex flex-col"} min-h-0 flex-1 gap-3 overflow-y-auto p-3 lg:overflow-hidden`}>
+                {workbenchLayout === "side" ? (
+                    <>
+                        <WorkbenchPanel
+                            layout="side"
+                            currentLayout={workbenchLayout}
+                            collapsedSections={collapsedSections}
+                            prompt={prompt}
+                            references={references}
+                            config={effectiveConfig}
+                            model={model}
+                            canGenerate={canGenerate}
+                            pendingCount={pendingCount}
+                            updateConfig={updateConfig}
+                            openConfigDialog={openConfigDialog}
+                            onLayoutChange={setWorkbenchLayout}
+                            onToggleSection={toggleCollapsedSection}
+                            onPromptChange={setPrompt}
+                            onOpenPromptLibrary={() => setPromptDialogOpen(true)}
+                            onOpenAssetPicker={() => setAssetPickerOpen(true)}
+                            onPastePrompt={() => void pastePromptFromClipboard()}
+                            onClearPrompt={clearPrompt}
+                            onPasteReferences={() => void addReferencesFromClipboard()}
+                            onUploadReferences={() => fileInputRef.current?.click()}
+                            onRemoveReference={(id) => setReferences((value) => value.filter((ref) => ref.id !== id))}
+                            onGenerate={() => void generate()}
+                        />
+                        <ResultsPanel
+                            results={results}
+                            logs={logs}
+                            categories={categories}
+                            resultViewMode={resultViewMode}
+                            activeCategoryId={activeResultCategoryId}
+                            pendingCount={pendingCount}
+                            now={now}
+                            selectedLogIds={selectedLogIds}
+                            activeLogId={previewLog?.id}
+                            onSelectedLogIdsChange={setSelectedLogIds}
+                            onCreateSession={createSession}
+                            onResultViewModeChange={setResultViewMode}
+                            onActiveCategoryChange={setActiveResultCategoryId}
+                            onCreateCategory={createCategory}
+                            onRenameCategory={(category, name) => void renameCategory(category, name)}
+                            onDeleteCategory={deleteCategory}
+                            onToggleLogCategory={(log, categoryId) => void toggleLogCategory(log, categoryId)}
+                            onClearLogCategories={(log) => void updateLogCategories(log, [])}
+                            onDeleteSelected={() => setDeleteConfirmOpen(true)}
+                            onDeleteLog={deleteLog}
+                            onPreviewLog={(log) => void previewGenerationLog(log)}
+                            onRetryLog={(log) => void retryLog(log)}
+                            onCopyPrompt={copyPrompt}
+                            onEdit={addResultToReferences}
+                            onDownload={downloadImage}
+                            onSaveAsset={saveResultToAssets}
+                            onRetry={retryResult}
+                        />
+                    </>
+                ) : (
+                    <>
+                        <ResultsPanel
+                            className="min-h-[360px] flex-1 pb-40 lg:pb-44"
+                            results={results}
+                            logs={logs}
+                            categories={categories}
+                            resultViewMode={resultViewMode}
+                            activeCategoryId={activeResultCategoryId}
+                            pendingCount={pendingCount}
+                            now={now}
+                            selectedLogIds={selectedLogIds}
+                            activeLogId={previewLog?.id}
+                            onSelectedLogIdsChange={setSelectedLogIds}
+                            onCreateSession={createSession}
+                            onResultViewModeChange={setResultViewMode}
+                            onActiveCategoryChange={setActiveResultCategoryId}
+                            onCreateCategory={createCategory}
+                            onRenameCategory={(category, name) => void renameCategory(category, name)}
+                            onDeleteCategory={deleteCategory}
+                            onToggleLogCategory={(log, categoryId) => void toggleLogCategory(log, categoryId)}
+                            onClearLogCategories={(log) => void updateLogCategories(log, [])}
+                            onDeleteSelected={() => setDeleteConfirmOpen(true)}
+                            onDeleteLog={deleteLog}
+                            onPreviewLog={(log) => void previewGenerationLog(log)}
+                            onRetryLog={(log) => void retryLog(log)}
+                            onCopyPrompt={copyPrompt}
+                            onEdit={addResultToReferences}
+                            onDownload={downloadImage}
+                            onSaveAsset={saveResultToAssets}
+                            onRetry={retryResult}
+                        />
+                        <WorkbenchPanel
+                            layout="bottom"
+                            currentLayout={workbenchLayout}
+                            collapsedSections={collapsedSections}
+                            prompt={prompt}
+                            references={references}
+                            config={effectiveConfig}
+                            model={model}
+                            canGenerate={canGenerate}
+                            pendingCount={pendingCount}
+                            updateConfig={updateConfig}
+                            openConfigDialog={openConfigDialog}
+                            onLayoutChange={setWorkbenchLayout}
+                            onToggleSection={toggleCollapsedSection}
+                            onPromptChange={setPrompt}
+                            onOpenPromptLibrary={() => setPromptDialogOpen(true)}
+                            onOpenAssetPicker={() => setAssetPickerOpen(true)}
+                            onPastePrompt={() => void pastePromptFromClipboard()}
+                            onClearPrompt={clearPrompt}
+                            onPasteReferences={() => void addReferencesFromClipboard()}
+                            onUploadReferences={() => fileInputRef.current?.click()}
+                            onRemoveReference={(id) => setReferences((value) => value.filter((ref) => ref.id !== id))}
+                            onGenerate={() => void generate()}
+                        />
+                    </>
+                )}
             </main>
             <input
                 ref={fileInputRef}
@@ -448,22 +606,6 @@ export default function ImagePage() {
                     event.target.value = "";
                 }}
             />
-            <Drawer title="生成记录" placement="bottom" size="large" open={logsOpen} onClose={() => setLogsOpen(false)}>
-                <LogPanel
-                    logs={logs}
-                    selectedLogIds={selectedLogIds}
-                    activeLogId={previewLog?.id}
-                    onSelectedLogIdsChange={setSelectedLogIds}
-                    onCreateSession={createSession}
-                    onDeleteSelected={() => setDeleteConfirmOpen(true)}
-                    onPreviewLog={(log) => void previewGenerationLog(log)}
-                />
-            </Drawer>
-            <Drawer title="参数" placement="bottom" height="82vh" open={settingsOpen} onClose={() => setSettingsOpen(false)}>
-                <div className="grid grid-cols-2 gap-3 pb-4">
-                    <GenerationSettings config={effectiveConfig} model={model} updateConfig={updateConfig} openConfigDialog={openConfigDialog} />
-                </div>
-            </Drawer>
             <PromptSelectDialog open={promptDialogOpen} onOpenChange={setPromptDialogOpen} onSelect={setPrompt} />
             <AssetPickerModal open={assetPickerOpen} defaultTab="my-assets" onInsert={(payload) => void insertPickedAsset(payload)} onClose={() => setAssetPickerOpen(false)} />
             <Modal title="删除生成记录" open={deleteConfirmOpen} onCancel={() => setDeleteConfirmOpen(false)} onOk={deleteSelectedLogs} okText="删除" okButtonProps={{ danger: true }} cancelText="取消">
@@ -473,40 +615,608 @@ export default function ImagePage() {
     );
 }
 
-function GenerationSettings({ config, model, updateConfig, openConfigDialog }: { config: AiConfig; model: string; updateConfig: UpdateAiConfig; openConfigDialog: (shouldPromptContinue?: boolean) => void }) {
-    const theme = canvasThemes[useThemeStore((state) => state.theme)];
+const quickSizeOptions = [
+    { value: "auto", label: "auto" },
+    { value: "1:1", label: "1:1" },
+    { value: "3:2", label: "3:2" },
+    { value: "2:3", label: "2:3" },
+    { value: "4:3", label: "4:3" },
+    { value: "3:4", label: "3:4" },
+    { value: "9:16", label: "9:16" },
+    { value: "2048x2048", label: "1:1 2k" },
+    { value: "2048x1152", label: "16:9 2k" },
+    { value: "1152x2048", label: "9:16 2k" },
+];
+
+const quickQualityOptions = [
+    { value: "auto", label: "自动" },
+    { value: "high", label: "高" },
+    { value: "medium", label: "中" },
+    { value: "low", label: "低" },
+];
+
+const quickFormatOptions = [
+    { value: "png", label: "PNG" },
+    { value: "jpeg", label: "JPEG" },
+    { value: "webp", label: "WebP" },
+];
+
+const quickModerationOptions = [
+    { value: "auto", label: "自动" },
+    { value: "low", label: "低" },
+];
+
+function WorkbenchPanel({
+    layout,
+    currentLayout,
+    collapsedSections,
+    prompt,
+    references,
+    config,
+    model,
+    canGenerate,
+    pendingCount,
+    updateConfig,
+    openConfigDialog,
+    onLayoutChange,
+    onToggleSection,
+    onPromptChange,
+    onOpenPromptLibrary,
+    onOpenAssetPicker,
+    onPastePrompt,
+    onClearPrompt,
+    onPasteReferences,
+    onUploadReferences,
+    onRemoveReference,
+    onGenerate,
+}: {
+    layout: WorkbenchLayout;
+    currentLayout: WorkbenchLayout;
+    collapsedSections: CollapsedSections;
+    prompt: string;
+    references: ReferenceImage[];
+    config: AiConfig;
+    model: string;
+    canGenerate: boolean;
+    pendingCount: number;
+    updateConfig: UpdateAiConfig;
+    openConfigDialog: (shouldPromptContinue?: boolean) => void;
+    onLayoutChange: (layout: WorkbenchLayout) => void;
+    onToggleSection: (section: CollapsibleSectionKey) => void;
+    onPromptChange: (value: string) => void;
+    onOpenPromptLibrary: () => void;
+    onOpenAssetPicker: () => void;
+    onPastePrompt: () => void;
+    onClearPrompt: () => void;
+    onPasteReferences: () => void;
+    onUploadReferences: () => void;
+    onRemoveReference: (id: string) => void;
+    onGenerate: () => void;
+}) {
+    if (layout === "bottom") {
+        return (
+            <div className="pointer-events-none fixed inset-x-0 bottom-5 z-40 flex justify-center px-5 sm:bottom-7 sm:px-10 lg:px-16">
+                <div className="pointer-events-auto w-full max-w-5xl rounded-[24px] bg-white/65 p-4 shadow-[0_32px_100px_rgba(15,23,42,.22),0_10px_34px_rgba(15,23,42,.10)] ring-1 ring-white/50 backdrop-blur-2xl dark:bg-stone-950/60 dark:ring-white/10 dark:shadow-[0_34px_110px_rgba(0,0,0,.58)]">
+                    <div className="flex flex-col gap-3">
+                        <div className="grid gap-2 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start">
+                            <Input.TextArea
+                                value={prompt}
+                                onChange={(event) => onPromptChange(event.target.value)}
+                                placeholder="描述你想生成的图片，可输入 @ 来指定参考图..."
+                                autoSize={{ minRows: 2, maxRows: 4 }}
+                                className="rounded-2xl"
+                                onPressEnter={(event) => {
+                                    if (!event.shiftKey && canGenerate) onGenerate();
+                                }}
+                            />
+                            <div className="flex shrink-0 flex-wrap justify-end gap-2">
+                                <Button title="清空输入" icon={<Trash2 className="size-4" />} onClick={onClearPrompt} />
+                                <Button title="提示词库" icon={<BookOpen className="size-4" />} onClick={onOpenPromptLibrary} />
+                                <Button title="我的素材" icon={<FolderPlus className="size-4" />} onClick={onOpenAssetPicker} />
+                                <Button title="切换到侧边工作台" icon={<PanelLeft className="size-4" />} onClick={() => onLayoutChange("side")} />
+                            </div>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-[1.15fr_1fr_1fr_0.95fr_0.9fr_0.9fr_auto_auto]">
+                            <QuickSelect label="尺寸" value={config.size || "auto"} options={quickSizeOptions} onChange={(value) => updateConfig("size", value)} />
+                            <QuickSelect label="质量" value={config.quality || "auto"} options={quickQualityOptions} onChange={(value) => updateConfig("quality", value)} />
+                            <QuickSelect label="格式" value={config.outputFormat || "png"} options={quickFormatOptions} onChange={(value) => updateConfig("outputFormat", value as AiConfig["outputFormat"])} />
+                            <QuickNumber label="压缩" value={config.outputCompression || "100"} min={0} max={100} disabled={(config.outputFormat || "png") === "png"} onChange={(value) => updateConfig("outputCompression", value)} />
+                            <QuickSelect label="审核" value={config.moderation || "auto"} options={quickModerationOptions} onChange={(value) => updateConfig("moderation", value as AiConfig["moderation"])} />
+                            <QuickNumber label="数量" value={config.count || "1"} min={1} max={10} onChange={(value) => updateConfig("count", value)} />
+                            <ReferenceQuickActions references={references} onUploadReferences={onUploadReferences} />
+                            <Button type="primary" className="h-11 min-w-28 rounded-xl" icon={<Sparkles className="size-4" />} disabled={!canGenerate} onClick={onGenerate}>
+                                {pendingCount ? `${pendingCount} 生成中` : "开始创作"}
+                            </Button>
+                        </div>
+                        {references.length ? <ReferenceStrip className="mt-3" references={references} compact onRemoveReference={onRemoveReference} /> : null}
+                    </div>
+                </div>
+            </div>
+        );
+    }
 
     return (
-        <>
-            <label className="col-span-2 block min-w-0 sm:col-span-1">
-                <span className="mb-1.5 block text-sm font-semibold sm:mb-2 sm:text-base">模型</span>
-                <ModelPicker config={config} value={model} onChange={(value) => updateConfig("imageModel", value)} fullWidth onMissingConfig={() => openConfigDialog(false)} />
-            </label>
-            <div className="col-span-2">
-                <ImageSettingsPanel config={config} onConfigChange={(key, value) => updateConfig(key, value)} theme={theme} showTitle={false} className="space-y-4" maxCount={10} />
+        <div className="flex min-h-[420px] flex-col overflow-hidden rounded-lg border border-stone-200 bg-card shadow-sm dark:border-stone-800 lg:min-h-0">
+            <div className="shrink-0 p-4 pb-3">
+                <WorkbenchHeader currentLayout={currentLayout} onLayoutChange={onLayoutChange} />
             </div>
-        </>
+            <div className="thin-scrollbar min-h-0 flex-1 space-y-3 overflow-y-auto px-4 pb-3">
+                <CollapsibleWorkbenchSection title="提示词" collapsed={collapsedSections.prompt} summary={prompt.trim() || "未填写提示词"} onToggle={() => onToggleSection("prompt")}>
+                    <div className="space-y-2">
+                        <div className="flex flex-wrap gap-2">
+                            <Button size="small" icon={<ClipboardPaste className="size-3.5" />} onClick={onPastePrompt}>
+                                读取剪贴板
+                            </Button>
+                            <Button size="small" icon={<Trash2 className="size-3.5" />} onClick={onClearPrompt}>
+                                清空
+                            </Button>
+                            <Button size="small" icon={<BookOpen className="size-3.5" />} onClick={onOpenPromptLibrary}>
+                                查看提示词库
+                            </Button>
+                            <Button size="small" icon={<FolderPlus className="size-3.5" />} onClick={onOpenAssetPicker}>
+                                查看我的素材
+                            </Button>
+                        </div>
+                        <Input.TextArea value={prompt} onChange={(event) => onPromptChange(event.target.value)} rows={6} placeholder="描述画面主体、风格、构图、光线和用途" />
+                    </div>
+                </CollapsibleWorkbenchSection>
+
+                <CollapsibleWorkbenchSection
+                    title="参考图"
+                    count={references.length}
+                    collapsed={collapsedSections.references}
+                    summary={references.length ? `已选择 ${references.length} 张参考图` : "暂无参考图"}
+                    onToggle={() => onToggleSection("references")}
+                >
+                    <div className="space-y-2">
+                        <div className="flex flex-wrap gap-2">
+                            <Button size="small" icon={<ClipboardPaste className="size-3.5" />} onClick={onPasteReferences}>
+                                剪切板
+                            </Button>
+                            <Button size="small" icon={<Upload className="size-3.5" />} onClick={onUploadReferences}>
+                                上传
+                            </Button>
+                        </div>
+                        <ReferenceStrip references={references} onRemoveReference={onRemoveReference} />
+                    </div>
+                </CollapsibleWorkbenchSection>
+
+                <CollapsibleWorkbenchSection title="参数" collapsed={collapsedSections.settings} summary={settingsSummary(config, model)} onToggle={() => onToggleSection("settings")}>
+                    <div className="space-y-3">
+                        <GenerationSettings config={config} model={model} updateConfig={updateConfig} openConfigDialog={openConfigDialog} />
+                    </div>
+                </CollapsibleWorkbenchSection>
+            </div>
+            <div className="shrink-0 border-t border-stone-200 p-4 dark:border-stone-800">
+                <Button type="primary" size="large" block icon={<Sparkles className="size-4" />} disabled={!canGenerate} onClick={onGenerate}>
+                    {pendingCount ? `继续提交（${pendingCount} 个生成中）` : "开始生成"}
+                </Button>
+            </div>
+        </div>
+    );
+}
+
+function WorkbenchHeader({ currentLayout, onLayoutChange, compact = false }: { currentLayout: WorkbenchLayout; onLayoutChange: (layout: WorkbenchLayout) => void; compact?: boolean }) {
+    return (
+        <div className="flex items-center justify-between gap-3">
+            <div className="min-w-0">
+                <h1 className={`${compact ? "text-base" : "text-2xl"} font-semibold text-stone-950 dark:text-stone-100`}>生图工作台</h1>
+            </div>
+            <div className="flex shrink-0 rounded-lg border border-stone-200 bg-stone-50 p-1 dark:border-stone-800 dark:bg-stone-900">
+                <Button size="small" type={currentLayout === "side" ? "primary" : "text"} icon={<PanelLeft className="size-3.5" />} onClick={() => onLayoutChange("side")}>
+                    侧边
+                </Button>
+                <Button size="small" type={currentLayout === "bottom" ? "primary" : "text"} icon={<PanelBottom className="size-3.5" />} onClick={() => onLayoutChange("bottom")}>
+                    底部
+                </Button>
+            </div>
+        </div>
+    );
+}
+
+function CollapsibleWorkbenchSection({ title, count, collapsed, summary, children, onToggle }: { title: string; count?: number; collapsed: boolean; summary: string; children: ReactNode; onToggle: () => void }) {
+    return (
+        <section className="rounded-lg border border-stone-200 bg-background dark:border-stone-800">
+            <button type="button" className="flex w-full items-center justify-between gap-3 px-3 py-2.5 text-left" onClick={onToggle}>
+                <span className="flex min-w-0 items-center gap-2">
+                    <span className="font-semibold">{title}</span>
+                    {typeof count === "number" ? <Tag className="m-0 text-xs">{count}</Tag> : null}
+                    {collapsed ? <span className="truncate text-xs text-stone-500 dark:text-stone-400">{summary}</span> : null}
+                </span>
+                {collapsed ? <ChevronDown className="size-4 shrink-0 text-stone-400" /> : <ChevronUp className="size-4 shrink-0 text-stone-400" />}
+            </button>
+            {!collapsed ? <div className="border-t border-stone-200 p-3 dark:border-stone-800">{children}</div> : null}
+        </section>
+    );
+}
+
+function ReferenceStrip({ references, compact = false, className = "", onRemoveReference }: { references: ReferenceImage[]; compact?: boolean; className?: string; onRemoveReference: (id: string) => void }) {
+    return (
+        <div
+            className={`hover-scrollbar hover-scrollbar-hint flex w-full min-w-0 max-w-full gap-2 overflow-x-scroll overflow-y-hidden rounded-lg border border-dashed border-stone-300 p-2 overscroll-x-contain dark:border-stone-700 ${compact ? "min-h-14" : "min-h-24 pb-3"} ${className}`}
+            onWheel={(event) => {
+                if (event.currentTarget.scrollWidth <= event.currentTarget.clientWidth) return;
+                event.preventDefault();
+                event.currentTarget.scrollLeft += event.deltaY;
+            }}
+        >
+            {references.map((item) => (
+                <div key={item.id} className={`${compact ? "size-12" : "size-20"} group relative shrink-0 overflow-hidden rounded-md border border-stone-200 dark:border-stone-800`}>
+                    <img src={item.dataUrl} alt={item.name} className="size-full object-cover" />
+                    <button type="button" className="absolute right-1 top-1 hidden size-6 items-center justify-center rounded bg-black/60 text-white group-hover:flex" onClick={() => onRemoveReference(item.id)} aria-label="移除参考图">
+                        <Trash2 className="size-3.5" />
+                    </button>
+                </div>
+            ))}
+            {!references.length ? <div className="flex min-w-full items-center justify-center text-sm text-stone-500">暂无参考图</div> : null}
+        </div>
+    );
+}
+
+function ReferenceQuickActions({ references, onUploadReferences }: { references: ReferenceImage[]; onUploadReferences: () => void }) {
+    return (
+        <div className="flex h-11 items-center gap-1 rounded-xl border border-stone-200 bg-background px-2 dark:border-stone-800">
+            {references[0] ? <img src={references[0].dataUrl} alt={references[0].name} className="size-7 rounded object-cover" /> : null}
+            {references.length ? <span className="min-w-7 text-xs text-stone-500">{references.length} 张</span> : null}
+            <Button size="small" type="text" icon={<Upload className="size-3.5" />} onClick={onUploadReferences} />
+        </div>
+    );
+}
+
+function QuickSelect({ label, value, options, onChange }: { label: string; value: string; options: { value: string; label: string }[]; onChange: (value: string) => void }) {
+    return (
+        <label className="grid gap-1 text-xs text-stone-500 dark:text-stone-400">
+            {label}
+            <select className="h-11 min-w-0 rounded-xl border border-stone-200 bg-background px-3 text-sm text-stone-900 outline-none dark:border-stone-800 dark:text-stone-100" value={value} onChange={(event) => onChange(event.target.value)}>
+                {options.map((item) => (
+                    <option key={item.value} value={item.value}>
+                        {item.label}
+                    </option>
+                ))}
+            </select>
+        </label>
+    );
+}
+
+function QuickNumber({ label, value, min, max, disabled, onChange }: { label: string; value: string; min: number; max: number; disabled?: boolean; onChange: (value: string) => void }) {
+    return (
+        <label className="grid gap-1 text-xs text-stone-500 dark:text-stone-400">
+            {label}
+            <input
+                className="h-11 min-w-0 rounded-xl border border-stone-200 bg-background px-3 text-sm text-stone-900 outline-none disabled:opacity-50 dark:border-stone-800 dark:text-stone-100"
+                type="number"
+                min={min}
+                max={max}
+                disabled={disabled}
+                value={value}
+                onChange={(event) => onChange(String(Math.max(min, Math.min(max, Number(event.target.value) || min))))}
+            />
+        </label>
+    );
+}
+
+function settingsSummary(config: AiConfig, model: string) {
+    return [
+        model,
+        imageSizeLabel(config.size || "auto"),
+        imageQualityLabel(config.quality || "auto"),
+        imageFormatLabel(config.outputFormat || "png"),
+        `压缩 ${config.outputCompression || "100"}`,
+        `审核 ${config.moderation || "auto"}`,
+        `${config.count || "1"} 张`,
+        `${config.timeout || "600"}s`,
+        config.streamImages ? `流式 ${config.streamPartialImages || "1"}` : "非流式",
+    ].join(" · ");
+}
+
+function ResultsPanel({
+    className = "",
+    results,
+    logs,
+    categories,
+    resultViewMode,
+    activeCategoryId,
+    pendingCount,
+    now,
+    selectedLogIds,
+    activeLogId,
+    onSelectedLogIdsChange,
+    onCreateSession,
+    onResultViewModeChange,
+    onActiveCategoryChange,
+    onCreateCategory,
+    onRenameCategory,
+    onDeleteCategory,
+    onToggleLogCategory,
+    onClearLogCategories,
+    onDeleteSelected,
+    onDeleteLog,
+    onPreviewLog,
+    onRetryLog,
+    onCopyPrompt,
+    onEdit,
+    onDownload,
+    onSaveAsset,
+    onRetry,
+}: {
+    className?: string;
+    results: GenerationResult[];
+    logs: GenerationLog[];
+    categories: GenerationCategory[];
+    resultViewMode: ResultViewMode;
+    activeCategoryId: string | null;
+    pendingCount: number;
+    now: number;
+    selectedLogIds: string[];
+    activeLogId?: string;
+    onSelectedLogIdsChange: (ids: string[]) => void;
+    onCreateSession: () => void;
+    onResultViewModeChange: (mode: ResultViewMode) => void;
+    onActiveCategoryChange: (id: string | null) => void;
+    onCreateCategory: (name: string) => Promise<GenerationCategory | null>;
+    onRenameCategory: (category: GenerationCategory, name: string) => void;
+    onDeleteCategory: (category: GenerationCategory) => void;
+    onToggleLogCategory: (log: GenerationLog, categoryId: string) => void;
+    onClearLogCategories: (log: GenerationLog) => void;
+    onDeleteSelected: () => void;
+    onDeleteLog: (log: GenerationLog) => void;
+    onPreviewLog: (log: GenerationLog) => void;
+    onRetryLog: (log: GenerationLog) => void;
+    onCopyPrompt: (text: string) => void | Promise<void>;
+    onEdit: (image: GeneratedImage, index: number) => void;
+    onDownload: (image: GeneratedImage, index: number) => void;
+    onSaveAsset: (image: GeneratedImage, index: number) => void;
+    onRetry: (result: GenerationResult) => void;
+}) {
+    const { message } = App.useApp();
+    const [creatingCategory, setCreatingCategory] = useState(false);
+    const [categoryName, setCategoryName] = useState("");
+    const liveImageIds = new Set(results.map((result) => result.image?.id).filter((id): id is string => Boolean(id)));
+    const baseVisibleLogs = logs.filter((log) => !log.images.some((image) => liveImageIds.has(image.id)));
+    const categoryGroups = categories.map((category) => ({ category, logs: baseVisibleLogs.filter((log) => log.categoryIds.includes(category.id)) }));
+    const activeCategory = activeCategoryId ? categories.find((category) => category.id === activeCategoryId) : null;
+    const visibleLogs = resultViewMode === "category" ? (activeCategoryId ? baseVisibleLogs.filter((log) => log.categoryIds.includes(activeCategoryId)) : baseVisibleLogs.filter((log) => !log.categoryIds.length)) : baseVisibleLogs;
+    const totalCount = results.length + (resultViewMode === "category" ? (activeCategoryId ? visibleLogs.length : categories.length + visibleLogs.length) : visibleLogs.length);
+    const shouldShowGrid = totalCount > 0;
+    const allVisibleLogsSelected = Boolean(visibleLogs.length) && visibleLogs.every((log) => selectedLogIds.includes(log.id));
+    const toggleVisibleLogs = () => onSelectedLogIdsChange(allVisibleLogsSelected ? selectedLogIds.filter((id) => !visibleLogs.some((log) => log.id === id)) : Array.from(new Set([...selectedLogIds, ...visibleLogs.map((log) => log.id)])));
+    const createCategory = async () => {
+        const name = categoryName.trim();
+        if (!name) {
+            message.error("请输入分类名称");
+            return;
+        }
+        const category = await onCreateCategory(name);
+        if (!category) return;
+        setCategoryName("");
+        setCreatingCategory(false);
+    };
+
+    useEffect(() => {
+        if (activeCategoryId && !categories.some((category) => category.id === activeCategoryId)) onActiveCategoryChange(null);
+    }, [activeCategoryId, categories, onActiveCategoryChange]);
+
+    return (
+        <div className={`thin-scrollbar rounded-lg border border-stone-200 bg-card p-4 shadow-sm dark:border-stone-800 lg:min-h-0 lg:overflow-y-auto lg:p-5 ${className}`}>
+            <div className="mb-4 flex items-center justify-between gap-3">
+                <div className="flex min-w-0 items-center gap-2">
+                    <History className="size-4 text-stone-400" />
+                    <h2 className="truncate text-xl font-semibold">{activeCategory ? activeCategory.name : "全部结果"}</h2>
+                    <Tag className="m-0">{totalCount}</Tag>
+                    {pendingCount ? <Tag className="m-0 px-2 py-1">{pendingCount} 个生成中</Tag> : null}
+                </div>
+                <div className="flex shrink-0 items-center gap-2">
+                    {activeCategory ? (
+                        <Button size="small" onClick={() => onActiveCategoryChange(null)}>
+                            返回分类
+                        </Button>
+                    ) : null}
+                    <div className="flex shrink-0 rounded-lg border border-stone-200 bg-stone-50 p-1 dark:border-stone-800 dark:bg-stone-900">
+                        <Button
+                            size="small"
+                            type={resultViewMode === "all" ? "primary" : "text"}
+                            onClick={() => {
+                                onActiveCategoryChange(null);
+                                onResultViewModeChange("all");
+                            }}
+                        >
+                            全部展示
+                        </Button>
+                        <Button size="small" type={resultViewMode === "category" ? "primary" : "text"} onClick={() => onResultViewModeChange("category")}>
+                            分类展示
+                        </Button>
+                    </div>
+                    <Button size="small" icon={<Plus className="size-3.5" />} onClick={resultViewMode === "category" ? () => setCreatingCategory(true) : onCreateSession}>
+                        {resultViewMode === "category" ? "新建分类" : "新建"}
+                    </Button>
+                    <Button size="small" icon={<CheckSquare className="size-3.5" />} disabled={!visibleLogs.length} onClick={toggleVisibleLogs}>
+                        {allVisibleLogsSelected ? "取消" : "全选"}
+                    </Button>
+                    <Button size="small" danger icon={<Trash2 className="size-3.5" />} disabled={!selectedLogIds.length} onClick={onDeleteSelected}>
+                        删除
+                    </Button>
+                </div>
+            </div>
+            {shouldShowGrid ? (
+                <div className="grid gap-3 sm:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
+                    {results.map((result, index) =>
+                        result.status === "success" && result.image ? (
+                            <ResultImageCard key={result.id} result={result} image={result.image} index={index} onCopyPrompt={onCopyPrompt} onEdit={onEdit} onDownload={onDownload} onSaveAsset={onSaveAsset} />
+                        ) : result.status === "failed" ? (
+                            <FailedImageCard key={result.id} result={result} error={result.error || "生成失败"} onCopyPrompt={onCopyPrompt} onRetry={() => onRetry(result)} />
+                        ) : (
+                            <PendingImageCard key={result.id} result={result} now={now} onCopyPrompt={onCopyPrompt} />
+                        ),
+                    )}
+                    {resultViewMode === "category" ? (
+                        <>
+                            {!activeCategoryId
+                                ? categoryGroups.map(({ category, logs: categoryLogs }) => (
+                                      <CategoryCard key={category.id} category={category} logs={categoryLogs} onRename={onRenameCategory} onDelete={onDeleteCategory} onOpen={() => onActiveCategoryChange(category.id)} />
+                                  ))
+                                : null}
+                        </>
+                    ) : null}
+                    {visibleLogs.map((log, index) => (
+                        <HistoryLogCard
+                            key={log.id}
+                            log={log}
+                            categories={categories}
+                            index={index}
+                            selected={selectedLogIds.includes(log.id)}
+                            active={activeLogId === log.id}
+                            onSelectedChange={(checked) => onSelectedLogIdsChange(checked ? [...selectedLogIds, log.id] : selectedLogIds.filter((id) => id !== log.id))}
+                            onDelete={() => onDeleteLog(log)}
+                            onToggleCategory={(categoryId) => onToggleLogCategory(log, categoryId)}
+                            onClearCategories={() => onClearLogCategories(log)}
+                            onCreateCategory={onCreateCategory}
+                            onPreview={() => onPreviewLog(log)}
+                            onRetry={() => onRetryLog(log)}
+                            onCopyPrompt={onCopyPrompt}
+                            onEdit={onEdit}
+                            onDownload={onDownload}
+                            onSaveAsset={onSaveAsset}
+                        />
+                    ))}
+                </div>
+            ) : (
+                <div className="flex min-h-[320px] flex-col items-center justify-center rounded-lg border border-dashed border-stone-300 text-center dark:border-stone-700 lg:min-h-[560px]">
+                    <ImagePlus className="mb-4 size-11 text-stone-400" />
+                    <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="还没有生成图片" />
+                </div>
+            )}
+            <Modal title="新建分类" open={creatingCategory} onCancel={() => setCreatingCategory(false)} onOk={() => void createCategory()} okText="创建" cancelText="取消" destroyOnHidden>
+                <Input value={categoryName} autoFocus placeholder="输入分类名称" onChange={(event) => setCategoryName(event.target.value)} onPressEnter={() => void createCategory()} />
+            </Modal>
+        </div>
+    );
+}
+
+function CategoryCard({
+    category,
+    logs,
+    onRename,
+    onDelete,
+    onOpen,
+}: {
+    category: GenerationCategory;
+    logs: GenerationLog[];
+    onRename: (category: GenerationCategory, name: string) => void;
+    onDelete: (category: GenerationCategory) => void;
+    onOpen: () => void;
+}) {
+    const [editing, setEditing] = useState(false);
+    const [name, setName] = useState(category.name);
+    const images = logs.flatMap((log) => log.images).slice(0, 6);
+
+    useEffect(() => {
+        setName(category.name);
+    }, [category.name]);
+
+    const saveName = () => {
+        const value = name.trim();
+        if (!value) return;
+        onRename(category, value);
+        setEditing(false);
+    };
+
+    return (
+        <div className="group relative min-h-[360px] overflow-hidden rounded-lg border border-stone-200 bg-stone-100/60 dark:border-stone-800 dark:bg-stone-900/60 sm:min-h-[420px]">
+            <button type="button" className="absolute inset-0 z-0 text-left" onClick={onOpen} aria-label={`打开分类 ${category.name}`} />
+            <div className="pointer-events-none absolute inset-0 overflow-hidden">
+                {images.length ? (
+                    <>
+                        {images.map((image, index) => (
+                            <img
+                                key={`${image.id}-${index}`}
+                                src={image.dataUrl}
+                                alt=""
+                                className={`${images.length === 1 ? "inset-0 size-full rounded-none border-0" : "h-[92%] w-[86%] rounded-lg border border-white/80 dark:border-stone-900"} absolute object-cover shadow-xl transition-transform duration-200 group-hover:scale-[1.02]`}
+                                style={{
+                                    left: images.length === 1 ? 0 : `${3 + index * 4}%`,
+                                    top: images.length === 1 ? 0 : `${4 + index * 3}%`,
+                                    transform: images.length === 1 ? "none" : `rotate(${(index - 2) * 4}deg)`,
+                                    zIndex: index + 1,
+                                }}
+                            />
+                        ))}
+                    </>
+                ) : (
+                    <div className="flex size-full items-center justify-center text-sm text-stone-500">暂无图片</div>
+                )}
+            </div>
+            <div className="absolute inset-x-0 bottom-0 z-10 bg-gradient-to-t from-black/80 via-black/45 to-transparent p-3 pt-10 text-white">
+                {editing ? <Input value={name} autoFocus onChange={(event) => setName(event.target.value)} onPressEnter={saveName} onBlur={saveName} /> : <div className="truncate text-sm font-semibold">{category.name}</div>}
+            </div>
+            <div className="absolute right-1.5 top-1.5 z-10 flex gap-1">
+                <Tag className="m-0 text-[10px]">{logs.length} 条</Tag>
+                <Tag className="m-0 text-[10px]">{images.length} 图</Tag>
+            </div>
+            <div className="absolute bottom-2 right-2 z-20 flex gap-1">
+                <Button title="改名" size="small" icon={<PenLine className="size-3.5" />} onClick={() => setEditing(true)} />
+                <Button title="删除" size="small" danger icon={<Trash2 className="size-3.5" />} onClick={() => onDelete(category)} />
+            </div>
+        </div>
+    );
+}
+
+function GenerationSettings({ config, model, updateConfig, openConfigDialog }: { config: AiConfig; model: string; updateConfig: UpdateAiConfig; openConfigDialog: (shouldPromptContinue?: boolean) => void }) {
+    const theme = canvasThemes[useThemeStore((state) => state.theme)];
+    const [modelCollapsed, setModelCollapsed] = useState(false);
+
+    return (
+        <div className="space-y-3">
+            <SettingSubsection title="模型" summary={model || "未选择模型"} collapsed={modelCollapsed} onToggle={() => setModelCollapsed((value) => !value)}>
+                <ModelPicker config={config} value={model} onChange={(value) => updateConfig("imageModel", value)} fullWidth onMissingConfig={() => openConfigDialog(false)} />
+            </SettingSubsection>
+            <ImageSettingsPanel config={config} onConfigChange={(key, value) => updateConfig(key, value)} theme={theme} showTitle={false} className="space-y-3" maxCount={10} collapsible />
+        </div>
+    );
+}
+
+function SettingSubsection({ title, summary, collapsed, children, onToggle }: { title: string; summary: string; collapsed: boolean; children: ReactNode; onToggle: () => void }) {
+    return (
+        <section className="overflow-hidden rounded-lg border border-stone-200 bg-background dark:border-stone-800">
+            <button type="button" className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left" onClick={onToggle}>
+                <span className="min-w-0">
+                    <span className="font-medium">{title}</span>
+                    {collapsed ? <span className="ml-2 text-xs text-stone-500 dark:text-stone-400">{summary}</span> : null}
+                </span>
+                {collapsed ? <ChevronDown className="size-4 shrink-0 text-stone-400" /> : <ChevronUp className="size-4 shrink-0 text-stone-400" />}
+            </button>
+            {!collapsed ? <div className="border-t border-stone-200 p-3 dark:border-stone-800">{children}</div> : null}
+        </section>
     );
 }
 
 function ResultImageCard({
+    result,
     image,
     index,
+    onCopyPrompt,
     onEdit,
     onDownload,
     onSaveAsset,
 }: {
+    result: GenerationResult;
     image: GeneratedImage;
     index: number;
+    onCopyPrompt: (text: string) => void | Promise<void>;
     onEdit: (image: GeneratedImage, index: number) => void;
     onDownload: (image: GeneratedImage, index: number) => void;
     onSaveAsset: (image: GeneratedImage, index: number) => void;
 }) {
     return (
         <div className="overflow-hidden rounded-lg border border-stone-200 bg-background dark:border-stone-800">
-            <Image src={image.dataUrl} alt={`生成结果 ${index + 1}`} className="aspect-square object-cover" />
-            <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-t border-stone-200 px-3 py-2.5 dark:border-stone-800">
-                <div className="flex min-w-0 flex-wrap gap-x-2 gap-y-1 text-xs text-stone-500 dark:text-stone-400">
+            <div className="relative aspect-[4/3] bg-stone-100 dark:bg-stone-900">
+                <Tag className="absolute right-1.5 top-1.5 z-10 m-0 text-[10px]" color="blue">
+                    新生成
+                </Tag>
+                <Image src={image.dataUrl} alt={`生成结果 ${index + 1}`} className="aspect-[4/3] object-cover" />
+            </div>
+            <TaskInfo result={result} onCopyPrompt={onCopyPrompt} />
+            <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-2 border-t border-stone-200 px-2.5 py-2 dark:border-stone-800">
+                <div className="flex min-w-0 flex-wrap gap-x-1.5 gap-y-1 text-[10px] text-stone-500 dark:text-stone-400">
                     <span>
                         {image.width}x{image.height}
                     </span>
@@ -514,48 +1224,48 @@ function ResultImageCard({
                     <span>{formatDuration(image.durationMs)}</span>
                 </div>
                 <div className="flex shrink-0 gap-1">
-                    <Button size="small" icon={<FolderPlus className="size-3.5" />} onClick={() => void onSaveAsset(image, index)}>
-                        添加到素材
-                    </Button>
-                    <Button size="small" icon={<PenLine className="size-3.5" />} onClick={() => void onEdit(image, index)}>
-                        加入参考图
-                    </Button>
-                    <Button size="small" icon={<Download className="size-3.5" />} onClick={() => onDownload(image, index)}>
-                        下载
-                    </Button>
+                    <Button size="small" icon={<FolderPlus className="size-3.5" />} onClick={() => void onSaveAsset(image, index)} />
+                    <Button size="small" icon={<PenLine className="size-3.5" />} onClick={() => void onEdit(image, index)} />
+                    <Button size="small" icon={<Download className="size-3.5" />} onClick={() => onDownload(image, index)} />
                 </div>
             </div>
         </div>
     );
 }
 
-function PendingImageCard() {
+function PendingImageCard({ result, now, onCopyPrompt }: { result: GenerationResult; now: number; onCopyPrompt: (text: string) => void | Promise<void> }) {
     return (
-        <div className="relative aspect-square overflow-hidden rounded-lg border border-dashed border-stone-300 bg-stone-50 dark:border-stone-700 dark:bg-stone-900">
-            <div
-                className="absolute inset-0 opacity-60"
-                style={{
-                    backgroundImage: "radial-gradient(circle, rgba(120,113,108,0.35) 1.4px, transparent 1.6px)",
-                    backgroundSize: "16px 16px",
-                }}
-            />
-            <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-sm text-stone-500 dark:text-stone-400">
-                <LoaderCircle className="size-6 animate-spin" />
-                <span>生成中</span>
+        <div className="overflow-hidden rounded-lg border border-dashed border-stone-300 bg-stone-50 dark:border-stone-700 dark:bg-stone-900">
+            <div className="relative aspect-[4/3]">
+                <div
+                    className="absolute inset-0 opacity-60"
+                    style={{
+                        backgroundImage: "radial-gradient(circle, rgba(120,113,108,0.35) 1.4px, transparent 1.6px)",
+                        backgroundSize: "16px 16px",
+                    }}
+                />
+                <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-sm text-stone-500 dark:text-stone-400">
+                    <LoaderCircle className="size-6 animate-spin" />
+                    <span>生成中</span>
+                    <span className="rounded-full bg-white/80 px-2 py-1 text-xs text-stone-600 shadow-sm dark:bg-stone-950/70 dark:text-stone-300">{formatDuration(Math.max(0, now - result.createdAt))}</span>
+                </div>
             </div>
+            <TaskInfo result={{ ...result, durationMs: Math.max(0, now - result.createdAt) }} onCopyPrompt={onCopyPrompt} />
         </div>
     );
 }
 
-function FailedImageCard({ error, onRetry }: { error: string; onRetry: () => void }) {
+function FailedImageCard({ result, error, onCopyPrompt, onRetry }: { result: GenerationResult; error: string; onCopyPrompt: (text: string) => void | Promise<void>; onRetry: () => void }) {
     return (
         <div className="overflow-hidden rounded-lg border border-red-200 bg-red-50 dark:border-red-950 dark:bg-red-950/20">
-            <div className="flex aspect-square flex-col items-center justify-center gap-3 p-5 text-center">
+            <div className="flex aspect-[4/3] flex-col items-center justify-center gap-3 p-5 text-center">
+                <AlertCircle className="size-7 text-red-500" />
                 <div className="text-sm font-medium text-red-600 dark:text-red-300">生成失败</div>
                 <Typography.Paragraph ellipsis={{ rows: 4 }} className="!mb-0 !text-xs !text-red-500 dark:!text-red-300">
                     {error}
                 </Typography.Paragraph>
             </div>
+            <TaskInfo result={result} error={error} onCopyPrompt={onCopyPrompt} />
             <div className="flex justify-end border-t border-red-200 p-3 dark:border-red-950">
                 <Button size="small" danger onClick={onRetry}>
                     重试
@@ -565,111 +1275,213 @@ function FailedImageCard({ error, onRetry }: { error: string; onRetry: () => voi
     );
 }
 
-function updateResultAt(results: GenerationResult[], index: number, next: Partial<GenerationResult>) {
-    return results.map((item, itemIndex) => (itemIndex === index ? { ...item, ...next } : item));
+function TaskInfo({ result, error, onCopyPrompt }: { result: GenerationResult; error?: string; onCopyPrompt: (text: string) => void | Promise<void> }) {
+    const [expanded, setExpanded] = useState(false);
+
+    return (
+        <div className="space-y-2 border-t border-stone-200 px-3 py-2.5 text-xs text-stone-500 dark:border-stone-800 dark:text-stone-400">
+            <div className="rounded-md bg-stone-50 p-2 dark:bg-stone-900">
+                <div className={`${expanded ? "" : "line-clamp-2"} whitespace-pre-wrap text-stone-700 dark:text-stone-200`}>{result.prompt}</div>
+                <div className="mt-2 flex justify-end gap-1">
+                    <Button size="small" type="text" icon={<Copy className="size-3.5" />} onClick={() => void onCopyPrompt(result.prompt)}>
+                        复制
+                    </Button>
+                    <Button size="small" type="text" icon={expanded ? <ChevronUp className="size-3.5" /> : <ChevronDown className="size-3.5" />} onClick={() => setExpanded((value) => !value)}>
+                        {expanded ? "收起" : "展开"}
+                    </Button>
+                </div>
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+                <Tag className="m-0">{formatLogTime(result.createdAt)}</Tag>
+                <Tag className="m-0">{result.model}</Tag>
+                <Tag className="m-0">{result.config.apiMode === "responses" ? "Responses" : "Images"}</Tag>
+                <Tag className="m-0">{result.config.size || "auto"}</Tag>
+                <Tag className="m-0">{result.config.quality || "auto"}</Tag>
+                <Tag className="m-0">{result.config.outputFormat || "png"}</Tag>
+                {(result.config.outputFormat || "png") !== "png" ? <Tag className="m-0">压缩 {result.config.outputCompression || "100"}</Tag> : null}
+                <Tag className="m-0">审核 {result.config.moderation || "auto"}</Tag>
+                {result.config.streamImages ? <Tag className="m-0">流式 {result.config.streamPartialImages || "1"}</Tag> : null}
+                <Tag className="m-0">超时 {result.config.timeout || "600"}s</Tag>
+                {result.durationMs ? <Tag className="m-0">{formatDuration(result.durationMs)}</Tag> : null}
+            </div>
+            {error ? <div className="rounded-md bg-red-100 px-2 py-1.5 text-red-600 dark:bg-red-950/40 dark:text-red-300">{error}</div> : null}
+        </div>
+    );
 }
 
-function LogPanel({
-    logs,
-    selectedLogIds,
-    activeLogId,
-    onSelectedLogIdsChange,
-    onCreateSession,
-    onDeleteSelected,
-    onPreviewLog,
+function HistoryLogCard({
+    log,
+    categories,
+    index,
+    selected,
+    active,
+    onSelectedChange,
+    onDelete,
+    onToggleCategory,
+    onClearCategories,
+    onCreateCategory,
+    onPreview,
+    onRetry,
+    onCopyPrompt,
+    onEdit,
+    onDownload,
+    onSaveAsset,
 }: {
-    logs: GenerationLog[];
-    selectedLogIds: string[];
-    activeLogId?: string;
-    onSelectedLogIdsChange: (ids: string[]) => void;
-    onCreateSession: () => void;
-    onDeleteSelected: () => void;
-    onPreviewLog: (log: GenerationLog) => void;
+    log: GenerationLog;
+    categories: GenerationCategory[];
+    index: number;
+    selected: boolean;
+    active: boolean;
+    onSelectedChange: (checked: boolean) => void;
+    onDelete: () => void;
+    onToggleCategory: (categoryId: string) => void;
+    onClearCategories: () => void;
+    onCreateCategory: (name: string) => Promise<GenerationCategory | null>;
+    onPreview: () => void;
+    onRetry: () => void;
+    onCopyPrompt: (text: string) => void | Promise<void>;
+    onEdit: (image: GeneratedImage, index: number) => void;
+    onDownload: (image: GeneratedImage, index: number) => void;
+    onSaveAsset: (image: GeneratedImage, index: number) => void;
 }) {
-    const allSelected = Boolean(logs.length) && selectedLogIds.length === logs.length;
-    const toggleAll = () => onSelectedLogIdsChange(allSelected ? [] : logs.map((log) => log.id));
+    const firstImage = log.images[0];
+    const [expanded, setExpanded] = useState(false);
+    const [categoryOpen, setCategoryOpen] = useState(false);
+    const [categoryName, setCategoryName] = useState("");
+    const logCategories = categories.filter((category) => log.categoryIds.includes(category.id));
+    const createCategory = async () => {
+        const category = await onCreateCategory(categoryName);
+        if (!category) return;
+        setCategoryName("");
+        onToggleCategory(category.id);
+        setCategoryOpen(false);
+    };
+    const closeThen = (action: () => void) => {
+        setCategoryOpen(false);
+        action();
+    };
 
     return (
-        <>
-            <div className="mb-3 flex items-center justify-between gap-3">
-                <div>
-                    <h2 className="text-base font-semibold">生成记录</h2>
+        <div className={`overflow-hidden rounded-lg border bg-background dark:bg-stone-950 ${active ? "border-stone-900 dark:border-stone-100" : "border-stone-200 dark:border-stone-800"}`}>
+            <div className="relative aspect-[4/3] bg-stone-100 dark:bg-stone-900">
+                <div className="absolute left-1.5 top-1.5 z-10 flex items-center gap-1 rounded-md bg-white/85 px-1.5 py-1 shadow-sm dark:bg-stone-950/80">
+                    <Checkbox checked={selected} onChange={(event) => onSelectedChange(event.target.checked)} />
+                    {selected ? <Button size="small" danger type="text" icon={<Trash2 className="size-3.5" />} onClick={onDelete} /> : null}
                 </div>
-                <Tag className="m-0">{logs.length}</Tag>
+                <div className="absolute right-1.5 top-1.5 z-10 flex gap-1">
+                    <Tag className="m-0 text-[10px]" color={log.failCount ? "red" : "blue"}>
+                        {log.failCount ? `失败 ${log.failCount}` : "成功"}
+                    </Tag>
+                    <Tag className="m-0 text-[10px]">{log.imageCount} 张</Tag>
+                </div>
+                {firstImage ? (
+                    <Image src={firstImage.dataUrl} alt={`历史结果 ${index + 1}`} className="aspect-[4/3] object-cover" />
+                ) : (
+                    <div className="flex size-full flex-col items-center justify-center gap-2 p-5 text-center text-sm text-red-500">
+                        <AlertCircle className="size-7" />
+                        <span>{log.errors[0] || "没有可显示的图片"}</span>
+                    </div>
+                )}
+                {log.images.length > 1 ? (
+                    <div className="absolute bottom-1.5 left-1.5 right-1.5 flex gap-1 overflow-hidden">
+                        {log.images.slice(0, 4).map((image) => (
+                            <img key={image.id} src={image.dataUrl} alt="" className="size-8 shrink-0 rounded border border-white/80 object-cover shadow-sm dark:border-stone-900/80" />
+                        ))}
+                    </div>
+                ) : null}
             </div>
-            <div className="mb-4 flex flex-wrap gap-2">
-                <Button size="small" icon={<Plus className="size-3.5" />} onClick={onCreateSession}>
-                    新建
-                </Button>
-                <Button size="small" icon={<CheckSquare className="size-3.5" />} disabled={!logs.length} onClick={toggleAll}>
-                    {allSelected ? "取消" : "全选"}
-                </Button>
-                <Button size="small" danger icon={<Trash2 className="size-3.5" />} disabled={!selectedLogIds.length} onClick={onDeleteSelected}>
-                    删除
-                </Button>
+            <div className="space-y-2 border-t border-stone-200 p-2.5 text-xs dark:border-stone-800">
+                <div className={`${expanded ? "" : "line-clamp-2"} whitespace-pre-wrap text-stone-700 dark:text-stone-200`}>{log.prompt}</div>
+                <div className="flex items-center justify-end gap-1">
+                    <Button size="small" type="text" icon={<Copy className="size-3.5" />} onClick={() => closeThen(() => void onCopyPrompt(log.prompt))}>
+                        复制
+                    </Button>
+                    <Button size="small" type="text" icon={expanded ? <ChevronUp className="size-3.5" /> : <ChevronDown className="size-3.5" />} onClick={() => closeThen(() => setExpanded((value) => !value))}>
+                        {expanded ? "收起" : "展开"}
+                    </Button>
+                </div>
+                <div className="flex flex-wrap gap-1">
+                    {logCategories.length ? (
+                        logCategories.map((category) => (
+                            <Tag key={category.id} className="m-0 text-[10px]" color="purple">
+                                {category.name}
+                            </Tag>
+                        ))
+                    ) : (
+                        <Tag className="m-0 text-[10px]">未分类</Tag>
+                    )}
+                    <Tag className="m-0 text-[10px]">{formatLogTime(log.createdAt)}</Tag>
+                    <Tag className="m-0 text-[10px]">{log.model}</Tag>
+                    <Tag className="m-0 text-[10px]">{log.config.apiMode === "responses" ? "Responses" : "Images"}</Tag>
+                    <Tag className="m-0 text-[10px]">{log.config.size || "auto"}</Tag>
+                    <Tag className="m-0 text-[10px]">{log.config.quality || "auto"}</Tag>
+                    <Tag className="m-0 text-[10px]">{log.config.outputFormat || "png"}</Tag>
+                    {(log.config.outputFormat || "png") !== "png" ? <Tag className="m-0 text-[10px]">压缩 {log.config.outputCompression || "100"}</Tag> : null}
+                    <Tag className="m-0 text-[10px]">审核 {log.config.moderation || "auto"}</Tag>
+                    {log.config.streamImages ? <Tag className="m-0 text-[10px]">流式 {log.config.streamPartialImages || "1"}</Tag> : null}
+                    <Tag className="m-0 text-[10px]">超时 {log.config.timeout || "600"}s</Tag>
+                    <Tag className="m-0 text-[10px]">{formatDuration(log.durationMs)}</Tag>
+                </div>
+                {log.errors[0] ? <div className="line-clamp-2 rounded-md bg-red-100 px-2 py-1 text-red-600 dark:bg-red-950/40 dark:text-red-300">{log.errors[0]}</div> : null}
             </div>
-            <div className="space-y-3">
-                {logs.map((log) => (
-                    <LogCard
-                        key={log.id}
-                        log={log}
-                        selected={selectedLogIds.includes(log.id)}
-                        active={activeLogId === log.id}
-                        onSelectedChange={(checked) => onSelectedLogIdsChange(checked ? [...selectedLogIds, log.id] : selectedLogIds.filter((id) => id !== log.id))}
-                        onClick={() => onPreviewLog(log)}
-                    />
-                ))}
-                {!logs.length ? <div className="flex min-h-48 items-center justify-center rounded-lg border border-dashed border-stone-300 text-center text-sm text-stone-500 dark:border-stone-700">暂无生成记录</div> : null}
+            <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-2 border-t border-stone-200 px-2.5 py-2 dark:border-stone-800">
+                <div className="relative flex flex-wrap gap-1">
+                    <Button size="small" onClick={() => closeThen(onPreview)}>
+                        载入
+                    </Button>
+                    <Button size="small" icon={<RotateCcw className="size-3.5" />} onClick={() => closeThen(onRetry)}>
+                        重试
+                    </Button>
+                    <Button size="small" icon={<FolderPlus className="size-3.5" />} onClick={() => setCategoryOpen((value) => !value)}>
+                        分类
+                    </Button>
+                    {categoryOpen ? (
+                        <div className="absolute bottom-full left-0 z-20 mb-2 w-56 rounded-lg border border-stone-200 bg-background p-2 shadow-xl dark:border-stone-800 dark:bg-stone-950">
+                            <div className="max-h-44 space-y-1 overflow-y-auto">
+                                {categories.map((category) => (
+                                    <label key={category.id} className="flex cursor-pointer items-center gap-2 rounded px-2 py-1 text-xs hover:bg-stone-100 dark:hover:bg-stone-900">
+                                        <Checkbox checked={log.categoryIds.includes(category.id)} onChange={() => closeThen(() => onToggleCategory(category.id))} />
+                                        <span className="truncate">{category.name}</span>
+                                    </label>
+                                ))}
+                                {!categories.length ? <div className="px-2 py-3 text-center text-xs text-stone-500">暂无分类</div> : null}
+                            </div>
+                            <div className="mt-2 flex gap-1 border-t border-stone-200 pt-2 dark:border-stone-800">
+                                <Input size="small" value={categoryName} placeholder="新分类" onChange={(event) => setCategoryName(event.target.value)} onPressEnter={() => void createCategory()} />
+                                <Button size="small" icon={<Plus className="size-3.5" />} onClick={() => void createCategory()} />
+                            </div>
+                            <Button size="small" type="link" className="!mt-1 !h-auto !p-0 text-xs" onClick={() => closeThen(onClearCategories)}>
+                                移至未分类
+                            </Button>
+                        </div>
+                    ) : null}
+                </div>
+                {firstImage ? (
+                    <div className="flex shrink-0 gap-1">
+                        <Button size="small" icon={<FolderPlus className="size-3.5" />} onClick={() => closeThen(() => void onSaveAsset(firstImage, index))} />
+                        <Button size="small" icon={<PenLine className="size-3.5" />} onClick={() => closeThen(() => void onEdit(firstImage, index))} />
+                        <Button size="small" icon={<Download className="size-3.5" />} onClick={() => closeThen(() => onDownload(firstImage, index))} />
+                    </div>
+                ) : null}
             </div>
-        </>
+        </div>
     );
 }
 
-function LogCard({ log, selected, active, onSelectedChange, onClick }: { log: GenerationLog; selected: boolean; active: boolean; onSelectedChange: (checked: boolean) => void; onClick: () => void }) {
-    return (
-        <button
-            type="button"
-            className={`block w-full rounded-lg border p-2 text-left transition ${active ? "border-stone-900 bg-blue-50 dark:border-stone-100 dark:bg-blue-950/20" : "border-stone-200 bg-background hover:bg-stone-50 dark:border-stone-800 dark:hover:bg-stone-900"}`}
-            onClick={onClick}
-        >
-            <div className="grid grid-cols-[minmax(128px,1fr)_auto] gap-2">
-                <div className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-start gap-2">
-                    <Checkbox className="mt-0.5" checked={selected} onClick={(event) => event.stopPropagation()} onChange={(event) => onSelectedChange(event.target.checked)} />
-                    <div className="min-w-0">
-                        <div className="truncate text-sm font-semibold leading-5">{log.title}</div>
-                        {log.thumbnails?.length ? (
-                            <div className="mt-2 flex gap-1 overflow-hidden">
-                                {log.thumbnails.slice(0, 4).map((image, index) => (
-                                    <img key={`${log.id}-${index}`} src={image} alt="" className="size-8 shrink-0 rounded-md object-cover" />
-                                ))}
-                            </div>
-                        ) : null}
-                    </div>
-                </div>
-                <div className="grid justify-items-end gap-2">
-                    <div className="flex gap-1">
-                        <Tag className="m-0 flex h-6 items-center rounded-md px-1.5 text-xs leading-none" color="blue">
-                            成功 {log.successCount ?? log.imageCount}
-                        </Tag>
-                        {log.failCount ? (
-                            <Tag className="m-0 flex h-6 items-center rounded-md px-1.5 text-xs leading-none" color="red">
-                                失败 {log.failCount}
-                            </Tag>
-                        ) : null}
-                    </div>
-                    <div className="flex flex-wrap justify-end gap-1">
-                        <Tag className="m-0 flex h-6 items-center rounded-md px-1.5 text-xs leading-none">{log.imageCount} 张</Tag>
-                        <Tag className="m-0 flex h-6 items-center rounded-md px-1.5 text-xs leading-none" color="green">
-                            {formatDuration(log.durationMs)}
-                        </Tag>
-                    </div>
-                    <div className="flex justify-end">
-                        <Tag className="m-0 flex h-6 items-center rounded-md px-1.5 text-xs leading-none">{log.time}</Tag>
-                    </div>
-                </div>
-            </div>
-        </button>
-    );
+function createPendingResult(id: string, snapshot: RequestSnapshot): GenerationResult {
+    return {
+        id,
+        status: "pending",
+        createdAt: Date.now(),
+        prompt: snapshot.text,
+        model: snapshot.displayConfig.imageModel || snapshot.displayConfig.model,
+        config: snapshot.displayConfig,
+        references: snapshot.references,
+    };
+}
+
+function updateResult(results: GenerationResult[], id: string, next: Partial<GenerationResult>) {
+    return results.map((item) => (item.id === id ? { ...item, ...next } : item));
 }
 
 async function readStoredLogs() {
@@ -681,6 +1493,16 @@ async function readStoredLogs() {
         });
         const logs = await Promise.all(values.map(normalizeLog));
         return logs.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+    } catch {
+        return [];
+    }
+}
+
+async function readStoredCategories() {
+    if (typeof window === "undefined") return [];
+    try {
+        const value = await categoryStore.getItem<GenerationCategory[]>(CATEGORY_STORE_KEY);
+        return Array.isArray(value) ? value.filter((item) => item.id && item.name).sort((a, b) => a.createdAt - b.createdAt) : [];
     } catch {
         return [];
     }
@@ -718,16 +1540,22 @@ async function normalizeLog(log: Partial<GenerationLog>): Promise<GenerationLog>
         status: log.status || "成功",
         images,
         thumbnails: images.map((image) => image.dataUrl),
+        errors: log.errors || [],
+        categoryIds: Array.isArray(log.categoryIds) ? log.categoryIds : [],
     };
 }
 
 function serializeLog(log: GenerationLog): GenerationLog {
     return {
         ...log,
-        references: log.references.map((item) => ({ ...item, dataUrl: item.storageKey ? "" : item.dataUrl })),
-        images: log.images.map((image) => ({ ...image, dataUrl: image.storageKey ? "" : image.dataUrl })),
-        thumbnails: [],
+        references: log.references.map((item) => ({ ...item, dataUrl: shouldPersistInlineImage(item.dataUrl) ? item.dataUrl : item.storageKey ? "" : item.dataUrl })),
+        images: log.images.map((image) => ({ ...image, dataUrl: shouldPersistInlineImage(image.dataUrl) ? image.dataUrl : image.storageKey ? "" : image.dataUrl })),
+        thumbnails: log.images.map((image) => (shouldPersistInlineImage(image.dataUrl) ? image.dataUrl : "")),
     };
+}
+
+function shouldPersistInlineImage(dataUrl?: string) {
+    return Boolean(dataUrl?.startsWith("data:image/"));
 }
 
 function normalizeLogConfig(log: Partial<GenerationLog>): GenerationLogConfig {
@@ -737,6 +1565,34 @@ function normalizeLogConfig(log: Partial<GenerationLog>): GenerationLogConfig {
         quality: log.config?.quality || log.quality || "",
         size: log.config?.size || log.size || "",
         count: log.config?.count || String(log.imageCount || log.successCount || 1),
+        apiMode: log.config?.apiMode || "images",
+        outputFormat: log.config?.outputFormat || "png",
+        outputCompression: log.config?.outputCompression || "100",
+        moderation: log.config?.moderation || "auto",
+        timeout: log.config?.timeout || "600",
+        streamImages: log.config?.streamImages || false,
+        streamPartialImages: log.config?.streamPartialImages || "1",
+        responseFormatB64Json: log.config?.responseFormatB64Json !== false,
+        codexCli: log.config?.codexCli || false,
+    };
+}
+
+function buildGenerationLogConfig(config: AiConfig): GenerationLogConfig {
+    return {
+        model: config.model,
+        imageModel: config.imageModel,
+        quality: config.quality,
+        size: config.size,
+        count: config.count,
+        apiMode: config.apiMode,
+        outputFormat: config.outputFormat,
+        outputCompression: config.outputCompression,
+        moderation: config.moderation,
+        timeout: config.timeout,
+        streamImages: config.streamImages,
+        streamPartialImages: config.streamPartialImages,
+        responseFormatB64Json: config.responseFormatB64Json,
+        codexCli: config.codexCli,
     };
 }
 
@@ -750,6 +1606,8 @@ function buildLog({
     failCount,
     status,
     images,
+    errors,
+    categoryIds,
 }: {
     prompt: string;
     model: string;
@@ -760,14 +1618,10 @@ function buildLog({
     failCount: number;
     status: GenerationLog["status"];
     images: GeneratedImage[];
+    errors: string[];
+    categoryIds?: string[];
 }): GenerationLog {
-    const logConfig = {
-        model: config.model,
-        imageModel: config.imageModel,
-        quality: config.quality,
-        size: config.size,
-        count: config.count,
-    };
+    const logConfig = config;
     return {
         id: nanoid(),
         createdAt: Date.now(),
@@ -786,5 +1640,11 @@ function buildLog({
         status,
         images,
         thumbnails: images.map((image) => image.dataUrl),
+        errors,
+        categoryIds: categoryIds || [],
     };
+}
+
+function formatLogTime(value: number) {
+    return new Date(value).toLocaleString("zh-CN", { hour12: false });
 }

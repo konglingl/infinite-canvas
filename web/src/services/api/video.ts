@@ -7,7 +7,8 @@ import { useUserStore } from "@/stores/use-user-store";
 import type { ReferenceImage } from "@/types/image";
 
 type VideoResponse = { id: string; status?: string; error?: { message?: string } };
-type ApiVideoResponse = VideoResponse | { code?: number; data?: VideoResponse | null; msg?: string };
+type ApiVideoEnvelope = { code: number; data?: VideoResponse | null; msg?: string };
+type ApiVideoResponse = VideoResponse | ApiVideoEnvelope;
 
 function aiApiUrl(config: AiConfig, path: string) {
     return config.channelMode === "remote" ? `/api/v1${path}` : buildApiUrl(config.baseUrl, path);
@@ -15,7 +16,8 @@ function aiApiUrl(config: AiConfig, path: string) {
 
 function aiHeaders(config: AiConfig) {
     const token = useUserStore.getState().token;
-    return config.channelMode === "remote" ? (token ? { Authorization: `Bearer ${token}` } : undefined) : { Authorization: `Bearer ${config.apiKey}` };
+    if (config.channelMode === "remote" && !token) throw new Error("请先登录后再使用云端渠道");
+    return config.channelMode === "remote" ? { Authorization: `Bearer ${token}` } : { Authorization: `Bearer ${config.apiKey}` };
 }
 
 function refreshRemoteUser(config: AiConfig) {
@@ -70,14 +72,18 @@ function normalizeVideoResolution(value: string) {
     return `${resolution}p`;
 }
 
-function unwrapVideoResponse(payload: ApiVideoResponse) {
+function unwrapVideoResponse(payload: ApiVideoResponse): VideoResponse {
     if (!payload) throw new Error("接口没有返回视频任务");
-    if ("code" in payload && typeof payload.code === "number") {
+    if (isVideoEnvelope(payload)) {
         if (payload.code !== 0) throw new Error(payload.msg || "请求失败");
         if (!payload.data) throw new Error("接口没有返回视频任务");
         return payload.data;
     }
     return payload;
+}
+
+function isVideoEnvelope(payload: ApiVideoResponse): payload is ApiVideoEnvelope {
+    return "code" in payload && typeof payload.code === "number";
 }
 
 function readAxiosError(error: unknown, fallback: string) {

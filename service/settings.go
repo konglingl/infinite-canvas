@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/basketikun/infinite-canvas/model"
 	"github.com/basketikun/infinite-canvas/repository"
@@ -16,7 +17,12 @@ import (
 
 func PublicSettings() (model.PublicSetting, error) {
 	settings, err := repository.GetSettings()
-	return normalizePublicSetting(settings.Public), err
+	settings = normalizeSettings(settings)
+	settings.Public.ModelChannel.Channels = publicChannelInfos(settings.Private.Channels)
+	if len(settings.Public.ModelChannel.AvailableModels) == 0 {
+		settings.Public.ModelChannel.AvailableModels = collectChannelModels(settings.Private.Channels)
+	}
+	return settings.Public, err
 }
 
 func AdminSettings() (model.Settings, error) {
@@ -68,6 +74,9 @@ func normalizePublicSetting(setting model.PublicSetting) model.PublicSetting {
 	if setting.ModelChannel.ModelCosts == nil {
 		setting.ModelChannel.ModelCosts = []model.ModelCost{}
 	}
+	if setting.ModelChannel.Channels == nil {
+		setting.ModelChannel.Channels = []model.PublicModelChannelInfo{}
+	}
 	for i := range setting.ModelChannel.ModelCosts {
 		setting.ModelChannel.ModelCosts[i].Model = strings.TrimSpace(setting.ModelChannel.ModelCosts[i].Model)
 		if setting.ModelChannel.ModelCosts[i].Credits < 0 {
@@ -113,6 +122,9 @@ func normalizePrivateSetting(setting model.PrivateSetting) model.PrivateSetting 
 		}
 		if setting.Channels[i].Weight <= 0 {
 			setting.Channels[i].Weight = 1
+		}
+		if setting.Channels[i].Timeout <= 0 {
+			setting.Channels[i].Timeout = 600
 		}
 	}
 	return setting
@@ -196,6 +208,9 @@ func normalizeModelChannel(channel model.ModelChannel) model.ModelChannel {
 	if channel.Weight <= 0 {
 		channel.Weight = 1
 	}
+	if channel.Timeout <= 0 {
+		channel.Timeout = 600
+	}
 	return channel
 }
 
@@ -239,7 +254,7 @@ func fetchAdminChannelModels(channel model.ModelChannel) ([]string, error) {
 		return nil, err
 	}
 	request.Header.Set("Authorization", "Bearer "+channel.APIKey)
-	response, err := http.DefaultClient.Do(request)
+	response, err := HTTPClientForChannel(channel).Do(request)
 	if err != nil {
 		return nil, err
 	}
@@ -281,7 +296,7 @@ func testAdminChannelModel(channel model.ModelChannel, modelName string) (string
 	}
 	request.Header.Set("Authorization", "Bearer "+channel.APIKey)
 	request.Header.Set("Content-Type", "application/json")
-	response, err := http.DefaultClient.Do(request)
+	response, err := HTTPClientForChannel(channel).Do(request)
 	if err != nil {
 		return "", err
 	}
@@ -328,6 +343,14 @@ func readAdminChannelError(body []byte, statusCode int, fallback string) error {
 	return safeMessageError{message: fallback}
 }
 
+func HTTPClientForChannel(channel model.ModelChannel) *http.Client {
+	timeout := channel.Timeout
+	if timeout <= 0 {
+		timeout = 600
+	}
+	return &http.Client{Timeout: time.Duration(timeout) * time.Second}
+}
+
 type safeMessageError struct {
 	message string
 }
@@ -353,5 +376,44 @@ func modelChannelsForModel(channels []model.ModelChannel, modelName string) []mo
 			}
 		}
 	}
+	return result
+}
+
+func publicChannelInfos(channels []model.ModelChannel) []model.PublicModelChannelInfo {
+	result := []model.PublicModelChannelInfo{}
+	for _, channel := range channels {
+		if !channel.Enabled || channel.BaseURL == "" || len(channel.Models) == 0 {
+			continue
+		}
+		result = append(result, model.PublicModelChannelInfo{
+			Name:    channel.Name,
+			BaseURL: channel.BaseURL,
+			Models:  append([]string{}, channel.Models...),
+			Weight:  channel.Weight,
+			Timeout: channel.Timeout,
+			Enabled: channel.Enabled,
+			Remark:  channel.Remark,
+		})
+	}
+	return result
+}
+
+func collectChannelModels(channels []model.ModelChannel) []string {
+	seen := map[string]bool{}
+	result := []string{}
+	for _, channel := range channels {
+		if !channel.Enabled || channel.BaseURL == "" {
+			continue
+		}
+		for _, item := range channel.Models {
+			modelName := strings.TrimSpace(item)
+			if modelName == "" || seen[modelName] {
+				continue
+			}
+			seen[modelName] = true
+			result = append(result, modelName)
+		}
+	}
+	sort.Strings(result)
 	return result
 }

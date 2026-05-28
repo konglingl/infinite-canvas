@@ -26,30 +26,38 @@
 
 - 前端：Next.js、React、TypeScript、Tailwind CSS、Ant Design、Zustand、TanStack Query。
 - 后端：Go、Gin、GORM。
-- 部署：Docker。
+- 部署：Docker、1Panel。
 
 ## 快速开始
-
-[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/basketikun/infinite-canvas)
 
 ```bash
 git clone git@github.com:basketikun/infinite-canvas.git
 cd infinite-canvas
 cp .env.example .env
 # 修改默认账号密码等信息
-docker-compose up -d
+docker compose up -d --build
 ```
 
-本地源码构建运行：
+本地非 Docker 开发运行：
 
 ```bash
 cp .env.example .env
-docker compose -f docker-compose.local.yml up -d --build
+go run .
 ```
 
-运行后默认端口3000，可访问 `http://localhost:3000`。
+另开一个终端：
 
-如需要拉取提示词，可前往:`http://localhost:3000/admin/prompts`
+```bash
+cd web
+npm install
+npm run dev
+```
+
+运行后默认端口 13000，可访问 `http://localhost:13000`。
+
+如果你 fork 后进行了二次开发，部署时需要使用当前源码构建或发布你自己的镜像，优先参考更完整的 [部署说明](docs/deployment.md)。
+
+如需要拉取提示词，可前往：`http://localhost:13000/admin/prompts`
 
 ## 效果展示
 
@@ -88,7 +96,6 @@ docker compose -f docker-compose.local.yml up -d --build
 ## 开源协议
 
 本项目使用 GNU Affero General Public License v3.0，见 [LICENSE](LICENSE)。
-
 
 ## Star History
 

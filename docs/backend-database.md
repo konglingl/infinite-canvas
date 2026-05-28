@@ -113,6 +113,7 @@
 |-------------------|----------|----------------|
 | `availableModels` | string[] | 系统可用模型列表       |
 | `modelCosts` | object[] | 模型算力点配置       |
+| `channels` | object[] | 公开接口返回的脱敏渠道摘要，不包含 API Key |
 | `defaultModel`    | string   | 默认模型           |
 | `defaultImageModel` | string | 默认图片模型         |
 | `defaultVideoModel` | string | 默认视频模型         |
@@ -151,6 +152,7 @@
 | `apiKey` | string   | 渠道密钥     |
 | `models` | string[] | 渠道可用模型列表 |
 | `weight` | number   | 渠道权重，同一模型命中多个渠道时按权重随机 |
+| `timeout` | number | 上游请求超时时间，单位秒，默认 600 |
 | `enabled` | bool    | 是否启用     |
 | `remark` | string   | 备注       |
 

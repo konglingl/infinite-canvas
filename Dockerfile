@@ -24,7 +24,7 @@ COPY service ./service
 COPY main.go ./
 RUN go build -o /server .
 
-# 运行镜像：Next.js 对外监听 3000，Go 只在容器内部监听 8080。
+# 运行镜像：Next.js 对外监听 13000，Go 只在容器内部监听 18080。
 FROM node:22-bookworm-slim
 
 WORKDIR /app
@@ -36,6 +36,6 @@ ENV PROMPT_DATA_DIR=/app/data/prompts
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
 RUN mkdir -p /app/data/prompts
 
-EXPOSE 3000
+EXPOSE 13000
 # 先启动内部 Go API，再由 Next.js 提供页面并代理 /api/*。
-CMD ["sh", "-c", "PORT=8080 /app/server & cd /app/web && HOSTNAME=0.0.0.0 PORT=3000 npm run start"]
+CMD ["sh", "-c", "PORT=18080 /app/server & cd /app/web && HOSTNAME=0.0.0.0 PORT=13000 API_BASE_URL=http://127.0.0.1:18080 npm run start"]

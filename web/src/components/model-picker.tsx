@@ -20,7 +20,12 @@ type ModelPickerProps = {
 export function ModelPicker({ config, value, onChange, className, fullWidth = false, placeholder = "选择模型", onMissingConfig }: ModelPickerProps) {
     const pickerId = useId();
     const [open, setOpen] = useState(false);
-    const options = useMemo(() => Array.from(new Set([...(config.channelMode === "local" ? [value] : []), ...config.models].filter(Boolean))), [config.channelMode, config.models, value]);
+    const options = useMemo(() => Array.from(new Set([...(config.channelMode === "local" ? [value] : []), ...config.models].filter((item): item is string => Boolean(item)))), [config.channelMode, config.models, value]);
+    const channelCounts = useMemo(() => {
+        const counts = new Map<string, number>();
+        config.publicChannels?.forEach((channel) => channel.models.forEach((model) => counts.set(model, (counts.get(model) || 0) + 1)));
+        return counts;
+    }, [config.publicChannels]);
     const current = value || "";
 
     useEffect(() => {
@@ -72,7 +77,7 @@ export function ModelPicker({ config, value, onChange, className, fullWidth = fa
                 {options.length ? (
                     options.map((model) => (
                         <SelectItem key={model} value={model} textValue={model}>
-                            <ModelLabel model={model} />
+                            <ModelLabel model={model} channelCount={channelCounts.get(model)} />
                         </SelectItem>
                     ))
                 ) : (
@@ -85,11 +90,12 @@ export function ModelPicker({ config, value, onChange, className, fullWidth = fa
     );
 }
 
-function ModelLabel({ model }: { model: string }) {
+function ModelLabel({ model, channelCount }: { model: string; channelCount?: number }) {
     return (
         <span className="flex min-w-0 items-center gap-2">
             <ModelIcon model={model} />
             <span className="truncate">{model}</span>
+            {channelCount ? <span className="ml-auto shrink-0 text-xs opacity-50">{channelCount} 渠道</span> : null}
         </span>
     );
 }

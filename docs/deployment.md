@@ -1,33 +1,444 @@
-# Render 部署
+# 部署说明
 
-点击下面按钮即可部署到 Render：
+本文档面向二次开发后的 `HuFakai/infinite-canvas` 仓库。你的代码已经不同于原作者仓库，部署时不要直接使用原作者镜像。默认端口约定如下：
 
-[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/basketikun/infinite-canvas)
+- 前端：`13000`
+- 后端：`18080`
+- 前端代理：`/api/* -> http://127.0.0.1:18080`
 
-## 部署步骤
+## 本地非 Docker 启动
 
-1. 点击 `Deploy to Render`。
-2. 登录 Render，并按页面提示连接 GitHub。
-3. 填写 `ADMIN_PASSWORD`，然后点击确认部署。
+本地开发需要两个终端，分别启动 Go 后端和 Next.js 前端。
 
-部署完成后，打开 Render 分配的 `.onrender.com` 域名即可访问。
+### 1. 准备环境
 
-## 免费版说明
+建议版本：
 
-默认使用 Render 免费 Web Service：
+- Go 1.25 或更高
+- Node.js 22 或更高
+- npm 10 或更高
 
-- 空闲约 15 分钟后会休眠，下次访问会自动唤醒。
-- 免费版本地文件不是持久化存储，SQLite 数据可能在重启、重新部署后丢失。
-- 适合体验和演示，不适合长期保存正式数据。
+首次运行：
 
-如果要长期使用，建议升级 Render 付费实例并挂载 Persistent Disk，或改用 PostgreSQL。
-
-## 管理员账号
-
-默认管理员用户名：
-
-```text
-admin
+```bash
+git clone https://github.com/HuFakai/infinite-canvas.git
+cd infinite-canvas
+cp .env.example .env
 ```
 
-管理员密码是在 Render 部署页面里填写的 `ADMIN_PASSWORD`。
+如果你已经在本地有项目，只需要确认 `.env` 存在即可。
+
+### 2. 启动后端
+
+在项目根目录运行：
+
+```bash
+go run .
+```
+
+默认后端监听：
+
+```text
+http://127.0.0.1:18080
+```
+
+健康检查：
+
+```bash
+curl http://127.0.0.1:18080/api/health
+```
+
+如果本机设置了代理，`curl` 访问本机端口时可以显式关闭代理：
+
+```bash
+curl -x "" http://127.0.0.1:18080/api/health
+```
+
+### 3. 启动前端
+
+另开一个终端：
+
+```bash
+cd web
+npm install
+npm run dev
+```
+
+默认前端地址：
+
+```text
+http://localhost:13000
+```
+
+如果后端端口不是 `18080`，启动前端时单独指定：
+
+```bash
+API_BASE_URL=http://127.0.0.1:你的后端端口 npm run dev
+```
+
+### 4. 常用本地命令
+
+类型检查：
+
+```bash
+cd web
+npx tsc --noEmit
+```
+
+后端测试：
+
+```bash
+go test ./...
+```
+
+前端生产构建：
+
+```bash
+cd web
+npm run build
+```
+
+## 服务器源码部署：更简单的方式
+
+如果你觉得 `systemd` 难理解，可以先用“源码 + nohup + 1Panel 反向代理”的方式跑起来。它不如 systemd 标准，但步骤更直观，适合个人服务器。
+
+### 1. 拉取代码
+
+```bash
+mkdir -p /opt/apps
+cd /opt/apps
+git clone https://github.com/HuFakai/infinite-canvas.git
+cd infinite-canvas
+cp .env.example .env
+```
+
+修改 `.env`：
+
+```env
+ADMIN_USERNAME=admin
+ADMIN_PASSWORD=请改成强密码
+JWT_SECRET=请改成随机长字符串
+JWT_EXPIRE_HOURS=168
+PORT=18080
+STORAGE_DRIVER=sqlite
+DATABASE_DSN=data/infinite-canvas.db
+```
+
+### 2. 安装依赖并构建
+
+```bash
+go build -o dist/infinite-canvas .
+cd web
+npm install
+npm run build
+cd ..
+mkdir -p logs
+```
+
+### 3. 启动后端
+
+```bash
+nohup ./dist/infinite-canvas > logs/api.log 2>&1 &
+```
+
+### 4. 启动前端
+
+```bash
+cd web
+API_BASE_URL=http://127.0.0.1:18080 HOSTNAME=0.0.0.0 PORT=13000 nohup npm run start > ../logs/web.log 2>&1 &
+```
+
+### 5. 查看日志
+
+```bash
+tail -f /opt/apps/infinite-canvas/logs/api.log
+tail -f /opt/apps/infinite-canvas/logs/web.log
+```
+
+### 6. 用 1Panel 配置域名
+
+在 1Panel 中创建网站，反向代理到：
+
+```text
+http://127.0.0.1:13000
+```
+
+然后申请 HTTPS 证书，打开强制 HTTPS。
+
+### 7. 如何停止
+
+```bash
+lsof -nP -iTCP:13000 -sTCP:LISTEN
+lsof -nP -iTCP:18080 -sTCP:LISTEN
+kill 对应PID
+```
+
+### 8. 如何更新
+
+```bash
+cd /opt/apps/infinite-canvas
+git pull
+go build -o dist/infinite-canvas .
+cd web
+npm install
+npm run build
+```
+
+然后停止旧进程，再按上面的命令重新启动后端和前端。
+
+## 服务器源码部署：systemd 托管
+
+`systemd` 的作用是让系统帮你守护进程：开机自动启动、崩溃自动重启、统一看日志。它不是必须的，但比 `nohup` 更适合长期运行。
+
+### 1. 构建代码
+
+```bash
+cd /opt/apps/infinite-canvas
+go build -o dist/infinite-canvas .
+cd web
+npm install
+npm run build
+```
+
+### 2. 后端服务文件
+
+创建 `/etc/systemd/system/infinite-canvas-api.service`：
+
+```ini
+[Unit]
+Description=Infinite Canvas API
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/apps/infinite-canvas
+EnvironmentFile=/opt/apps/infinite-canvas/.env
+ExecStart=/opt/apps/infinite-canvas/dist/infinite-canvas
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+```
+
+启动后端：
+
+```bash
+systemctl daemon-reload
+systemctl enable --now infinite-canvas-api
+systemctl status infinite-canvas-api
+```
+
+### 3. 前端服务文件
+
+创建 `/etc/systemd/system/infinite-canvas-web.service`：
+
+```ini
+[Unit]
+Description=Infinite Canvas Web
+After=network.target infinite-canvas-api.service
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/apps/infinite-canvas/web
+Environment=NODE_ENV=production
+Environment=HOSTNAME=0.0.0.0
+Environment=PORT=13000
+Environment=API_BASE_URL=http://127.0.0.1:18080
+ExecStart=/usr/bin/npm run start
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+```
+
+启动前端：
+
+```bash
+systemctl daemon-reload
+systemctl enable --now infinite-canvas-web
+systemctl status infinite-canvas-web
+```
+
+查看日志：
+
+```bash
+journalctl -u infinite-canvas-api -f
+journalctl -u infinite-canvas-web -f
+```
+
+更新后重启：
+
+```bash
+systemctl restart infinite-canvas-api infinite-canvas-web
+```
+
+## 自行构建二开镜像
+
+这里有两种方案，你可以按服务器条件选择。
+
+### 方案 A：把代码上传到服务器，在服务器构建镜像
+
+这是最直观的方案。流程是：
+
+1. 服务器拉取你的 GitHub 仓库代码。
+2. 在服务器上执行 `docker compose up -d --build`。
+3. Docker 根据当前源码构建镜像。
+4. 构建完成后自动启动容器。
+
+命令：
+
+```bash
+mkdir -p /opt/apps
+cd /opt/apps
+git clone https://github.com/HuFakai/infinite-canvas.git
+cd infinite-canvas
+cp .env.example .env
+docker compose up -d --build
+```
+
+当前 [docker-compose.yml](/Users/fakaihu/Documents/project/image2/infinite-canvas/docker-compose.yml:1) 已经是“从当前源码构建镜像”的模式：
+
+```yaml
+services:
+  app:
+    image: infinite-canvas:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: infinite-canvas
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+    ports:
+      - "13000:13000"
+    restart: unless-stopped
+```
+
+启动后访问：
+
+```text
+http://服务器IP:13000
+```
+
+在 1Panel 中使用时，把这个仓库目录作为 Compose 项目导入即可。后续更新：
+
+```bash
+git pull
+docker compose up -d --build
+```
+
+### 方案 B：GitHub 自动构建镜像，服务器只拉镜像运行
+
+这个方案更适合长期维护。流程是：
+
+1. 你把二次开发代码 push 到 `HuFakai/infinite-canvas`。
+2. GitHub Actions 自动构建镜像。
+3. 镜像发布到 GitHub Container Registry。
+4. 服务器的 1Panel 或 Compose 只负责拉镜像运行。
+
+仓库内已经有工作流：
+
+```text
+.github/workflows/docker-image.yml
+```
+
+它会在 `main` 或 `master` 分支 push 后发布：
+
+```text
+ghcr.io/HuFakai/infinite-canvas:latest
+```
+
+打版本 tag 也会发布版本镜像：
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+服务器上的 Compose 可以写成：
+
+```yaml
+services:
+  app:
+    image: ghcr.io/hufakai/infinite-canvas:latest
+    container_name: infinite-canvas
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+    ports:
+      - "13000:13000"
+    restart: unless-stopped
+```
+
+注意：如果 GHCR 镜像是私有的，服务器需要先 `docker login ghcr.io`。如果你把包设置为公开，服务器可以直接拉取。
+
+## 1Panel 部署建议
+
+推荐优先级：
+
+1. 想最快跑通：服务器拉代码后执行 `docker compose up -d --build`。
+2. 想以后升级方便：GitHub Actions 构建 `ghcr.io/hufakai/infinite-canvas:latest`，1Panel 拉你的镜像。
+3. 不想用 Docker：用上面的 `nohup` 简化源码部署，跑稳后再考虑 systemd。
+
+生产环境建议：
+
+- 不要使用默认 `ADMIN_PASSWORD`。
+- 不要使用默认 `JWT_SECRET`。
+- 用 1Panel 站点代理到 `127.0.0.1:13000`。
+- 开启 HTTPS。
+- 定期备份 `.env` 和 `data`。
+
+## 常见问题
+
+### 为什么不能继续用原作者镜像
+
+原作者镜像只包含原作者仓库构建出的代码，不包含你在 `HuFakai/infinite-canvas` 中做的二次开发。你的部署必须来自当前源码构建，或者来自你自己发布的镜像。
+
+### 本地前端提示接口连接失败
+
+确认后端正在运行：
+
+```bash
+curl http://127.0.0.1:18080/api/health
+```
+
+如果后端不是 `18080`，启动前端时指定：
+
+```bash
+API_BASE_URL=http://127.0.0.1:你的后端端口 npm run dev
+```
+
+### Docker 部署后数据丢失
+
+确认挂载了数据目录：
+
+```yaml
+volumes:
+  - ./data:/app/data
+```
+
+SQLite 数据库默认在：
+
+```text
+data/infinite-canvas.db
+```
+
+### 端口被占用
+
+本地开发可以临时换前端端口：
+
+```bash
+cd web
+npm run dev -- -p 13001
+```
+
+Docker Compose 可以改端口映射：
+
+```yaml
+ports:
+  - "13001:13000"
+```

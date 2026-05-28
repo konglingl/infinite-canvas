@@ -1,6 +1,6 @@
 "use client";
 
-import { App, Button, Form, Input, Modal, Segmented } from "antd";
+import { App, Button, Form, Input, Modal, Segmented, Select, Switch } from "antd";
 import { useState } from "react";
 
 import { ModelPicker } from "@/components/model-picker";
@@ -111,6 +111,19 @@ export function AppConfigModal() {
                         <div className="mb-4 rounded-lg border border-stone-200 p-3 text-sm text-stone-500 dark:border-stone-800">
                             <div className="font-medium text-stone-900 dark:text-stone-100">云端渠道</div>
                             <div className="mt-1">由系统后台渠道转发请求，当前可用 {modelChannel?.availableModels.length || 0} 个模型。</div>
+                            {modelChannel?.channels?.length ? (
+                                <div className="mt-3 grid gap-2">
+                                    {modelChannel.channels.slice(0, 4).map((channel, index) => (
+                                        <div key={`${channel.name}-${channel.baseUrl}-${index}`} className="rounded-md bg-stone-50 px-2.5 py-2 text-xs text-stone-600 dark:bg-stone-900 dark:text-stone-300">
+                                            <div className="flex items-center justify-between gap-2">
+                                                <span className="truncate font-medium">{channel.name || "未命名渠道"}</span>
+                                                <span className="shrink-0">{channel.models.length} 个模型</span>
+                                            </div>
+                                            <div className="mt-1 truncate opacity-70">{channel.baseUrl}</div>
+                                        </div>
+                                    ))}
+                                </div>
+                            ) : null}
                         </div>
                     )}
                     <div className="grid gap-4 md:grid-cols-3">
@@ -124,6 +137,39 @@ export function AppConfigModal() {
                             <ModelPicker config={modelConfig} value={modelConfig.textModel} onChange={(model) => updateConfig("textModel", model)} fullWidth />
                         </Form.Item>
                     </div>
+                    <div className="grid gap-4 md:grid-cols-3">
+                        <Form.Item label="生图 API 接口" className="mb-4">
+                            <Select
+                                value={config.apiMode}
+                                onChange={(value) => updateConfig("apiMode", value)}
+                                options={[
+                                    { label: "Image API (/v1/images)", value: "images" },
+                                    { label: "Responses API (/v1/responses)", value: "responses" },
+                                ]}
+                            />
+                        </Form.Item>
+                        <Form.Item label="请求超时（秒）" className="mb-4">
+                            <Input value={config.timeout} inputMode="numeric" onChange={(event) => updateConfig("timeout", event.target.value)} />
+                        </Form.Item>
+                        <Form.Item label="请求中间步骤图像数" className="mb-4">
+                            <Select
+                                value={config.streamPartialImages}
+                                disabled={!config.streamImages}
+                                onChange={(value) => updateConfig("streamPartialImages", value)}
+                                options={[
+                                    { label: "0 张", value: "0" },
+                                    { label: "1 张", value: "1" },
+                                    { label: "2 张", value: "2" },
+                                    { label: "3 张", value: "3" },
+                                ]}
+                            />
+                        </Form.Item>
+                    </div>
+                    <div className="mb-4 grid gap-3 md:grid-cols-3">
+                        <FeatureSwitch title="流式传输" description="开启后请求中追加 stream，支持读取中间图片事件并避免长时间无数据。" checked={config.streamImages} onChange={(checked) => updateConfig("streamImages", checked)} />
+                        <FeatureSwitch title="返回 Base64 图片数据" description="开启后 Image API 请求会追加 response_format: b64_json。" checked={config.responseFormatB64Json} onChange={(checked) => updateConfig("responseFormatB64Json", checked)} />
+                        <FeatureSwitch title="Codex CLI 兼容模式" description="开启后减少不兼容参数，并追加防提示词改写前缀。" checked={config.codexCli} onChange={(checked) => updateConfig("codexCli", checked)} />
+                    </div>
                     {effectiveMode === "local" ? (
                         <Form.Item label="系统提示词" className="mb-0">
                             <Input.TextArea rows={3} value={config.systemPrompt} placeholder="例如：你是一位擅长电影感写实摄影的视觉导演。" onChange={(event) => updateConfig("systemPrompt", event.target.value)} />
@@ -132,5 +178,17 @@ export function AppConfigModal() {
                 </Form>
             </div>
         </Modal>
+    );
+}
+
+function FeatureSwitch({ title, description, checked, onChange }: { title: string; description: string; checked: boolean; onChange: (checked: boolean) => void }) {
+    return (
+        <div className="rounded-lg border border-stone-200 px-3 py-2 dark:border-stone-800">
+            <div className="flex items-center justify-between gap-3">
+                <div className="text-sm font-medium">{title}</div>
+                <Switch checked={checked} onChange={onChange} />
+            </div>
+            <div className="mt-1 text-xs leading-5 text-stone-500">{description}</div>
+        </div>
     );
 }

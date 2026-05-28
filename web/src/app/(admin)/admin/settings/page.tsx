@@ -29,6 +29,7 @@ const emptySettings: AdminSettings = {
         modelChannel: {
             availableModels: [],
             modelCosts: [],
+            channels: [],
             defaultModel: "",
             defaultImageModel: "",
             defaultVideoModel: "",
@@ -40,7 +41,7 @@ const emptySettings: AdminSettings = {
     },
     private: { channels: [], promptSync: { enabled: true, cron: "*/5 * * * *" }, auth: { linuxDo: { clientId: "", clientSecret: "" } } },
 };
-const emptyChannel: AdminModelChannel = { protocol: "openai", name: "", baseUrl: "", apiKey: "", models: [], weight: 1, enabled: true, remark: "" };
+const emptyChannel: AdminModelChannel = { protocol: "openai", name: "", baseUrl: "", apiKey: "", models: [], weight: 1, timeout: 600, enabled: true, remark: "" };
 
 type SettingsTabKey = "public" | "private";
 type EditorMode = "visual" | "json";
@@ -463,15 +464,12 @@ export default function AdminSettingsPage() {
                                                     dataIndex: "credits",
                                                     width: 220,
                                                     render: (_, item) => (
-                                                        <InputNumber
-                                                            min={0}
-                                                            step={1}
-                                                            precision={0}
-                                                            className="!w-full"
-                                                            value={item.credits}
-                                                            addonAfter="点"
-                                                            onChange={(value) => setModelCost(form, setModelCosts, item.model, Number(value) || 0)}
-                                                        />
+                                                        <Space.Compact className="!w-full">
+                                                            <InputNumber min={0} step={1} precision={0} className="!w-full" value={item.credits} onChange={(value) => setModelCost(form, setModelCosts, item.model, Number(value) || 0)} />
+                                                            <span className="flex h-8 items-center rounded-r-md border border-l-0 border-stone-200 bg-stone-50 px-3 text-sm text-stone-500 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-300">
+                                                                点
+                                                            </span>
+                                                        </Space.Compact>
                                                     ),
                                                 },
                                             ]}
@@ -565,6 +563,7 @@ export default function AdminSettingsPage() {
                                             ),
                                         },
                                         { title: "权重", dataIndex: "weight", width: 88 },
+                                        { title: "超时", dataIndex: "timeout", width: 96, render: (value) => `${value || 600}s` },
                                         {
                                             title: "操作",
                                             key: "actions",
@@ -639,6 +638,11 @@ export default function AdminSettingsPage() {
                             <Col span={12}>
                                 <Form.Item name="weight" label="权重">
                                     <InputNumber min={1} step={1} className="!w-full" />
+                                </Form.Item>
+                            </Col>
+                            <Col span={12}>
+                                <Form.Item name="timeout" label="请求超时（秒）" extra="用于后台代理请求、模型列表读取和渠道测试">
+                                    <InputNumber min={1} step={30} className="!w-full" />
                                 </Form.Item>
                             </Col>
                             <Col span={12}>
@@ -834,6 +838,7 @@ function normalizePublicSetting(setting: Partial<AdminSettings["public"]> = {}):
             ...(setting.modelChannel || {}),
             availableModels: setting.modelChannel?.availableModels || [],
             modelCosts: normalizeModelCosts(setting.modelChannel?.modelCosts || []),
+            channels: setting.modelChannel?.channels || [],
         },
         auth: {
             allowRegister: setting.auth?.allowRegister !== false,
@@ -872,6 +877,7 @@ function normalizeChannel(item: Partial<AdminModelChannel> = {}): AdminModelChan
         apiKey: item.apiKey || "",
         models: item.models || [],
         weight: Math.max(1, Number(item.weight) || 1),
+        timeout: Math.max(1, Number(item.timeout) || 600),
         enabled: item.enabled !== false,
         remark: item.remark || "",
     };
@@ -905,11 +911,7 @@ function collectChannelModels(channels: AdminModelChannel[]) {
 }
 
 function collectKnownModels(settings: AdminSettings) {
-    return uniqueModels([
-        ...(settings.public.modelChannel.availableModels || []),
-        ...(settings.public.modelChannel.modelCosts || []).map((item) => item.model),
-        ...settings.private.channels.flatMap((channel) => channel.models || []),
-    ]);
+    return uniqueModels([...(settings.public.modelChannel.availableModels || []), ...(settings.public.modelChannel.modelCosts || []).map((item) => item.model), ...settings.private.channels.flatMap((channel) => channel.models || [])]);
 }
 
 function buildModelSelectGroups(sourceModels: string[], existingModels: string[]): Record<ModelSelectTabKey, string[]> {
