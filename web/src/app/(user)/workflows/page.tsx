@@ -1,7 +1,7 @@
 "use client";
 
 import { App, Button, Checkbox, Empty, Image, Input, Modal, Select, Space, Switch, Tag, Typography } from "antd";
-import { Copy, Download, Edit3, FilePlus2, Play, Plus, Sparkles, Trash2, WandSparkles } from "lucide-react";
+import { AlertCircle, CheckCircle2, Copy, Download, Edit3, FilePlus2, LoaderCircle, Play, Plus, Sparkles, Trash2, WandSparkles } from "lucide-react";
 import localforage from "localforage";
 import { nanoid } from "nanoid";
 import { saveAs } from "file-saver";
@@ -65,6 +65,24 @@ type WorkflowRunResult = {
     createdAt: number;
 };
 
+type WorkflowTask = {
+    id: string;
+    status: "running" | "success" | "failed";
+    workflowId: string;
+    workflowName: string;
+    prompt: string;
+    inputs: Record<string, string>;
+    model: string;
+    apiMode: AiConfig["apiMode"];
+    config: WorkflowGenerationConfig;
+    count: number;
+    startedAt: number;
+    endedAt?: number;
+    durationMs?: number;
+    images: WorkflowRunResult[];
+    error?: string;
+};
+
 type ImageHistoryLog = {
     id: string;
     createdAt: number;
@@ -122,7 +140,8 @@ export default function WorkflowsPage() {
     const [runningWorkflow, setRunningWorkflow] = useState<CreativeWorkflow | null>(null);
     const [inputValues, setInputValues] = useState<Record<string, string>>({});
     const [runResults, setRunResults] = useState<WorkflowRunResult[]>([]);
-    const [running, setRunning] = useState(false);
+    const [workflowTasks, setWorkflowTasks] = useState<WorkflowTask[]>([]);
+    const [now, setNow] = useState(Date.now());
     const [query, setQuery] = useState("");
 
     const filteredWorkflows = useMemo(() => {
@@ -132,10 +151,17 @@ export default function WorkflowsPage() {
     }, [query, workflows]);
 
     const renderedPrompt = useMemo(() => (runningWorkflow ? renderWorkflowPrompt(runningWorkflow, inputValues) : ""), [inputValues, runningWorkflow]);
+    const runningTaskCount = workflowTasks.filter((task) => task.status === "running").length;
 
     useEffect(() => {
         void refreshWorkflows();
     }, []);
+
+    useEffect(() => {
+        if (!runningTaskCount) return;
+        const timer = window.setInterval(() => setNow(Date.now()), 1000);
+        return () => window.clearInterval(timer);
+    }, [runningTaskCount]);
 
     const refreshWorkflows = async () => {
         const stored = await workflowStore.getItem<CreativeWorkflow[]>(WORKFLOW_STORE_KEY);
@@ -160,7 +186,6 @@ export default function WorkflowsPage() {
     };
 
     const closeRunner = () => {
-        if (running) return;
         setRunningWorkflow(null);
     };
 
@@ -216,14 +241,62 @@ export default function WorkflowsPage() {
             return;
         }
 
-        setRunning(true);
-        const startedAt = performance.now();
+        const startedAt = Date.now();
+        const performanceStartedAt = performance.now();
         const count = Math.max(1, Math.min(10, Number(runConfig.count) || 1));
+        const taskId = nanoid();
+        const taskConfig = { ...runningWorkflow.config, model, imageModel: model, apiMode: runtime.apiMode };
+        const promptSnapshot = renderedPrompt;
+        const inputSnapshot = { ...inputValues };
+        setWorkflowTasks((value) => [
+            {
+                id: taskId,
+                status: "running",
+                workflowId: runningWorkflow.id,
+                workflowName: runningWorkflow.name,
+                prompt: promptSnapshot,
+                inputs: inputSnapshot,
+                model,
+                apiMode: runtime.apiMode,
+                config: taskConfig,
+                count,
+                startedAt,
+                images: [],
+            },
+            ...value,
+        ]);
+        void executeWorkflowTask({ taskId, workflow: runningWorkflow, prompt: promptSnapshot, inputSnapshot, runConfig, taskConfig, model, count, startedAt, performanceStartedAt });
+        message.success("工作流任务已开始");
+    };
+
+    const executeWorkflowTask = async ({
+        taskId,
+        workflow,
+        prompt,
+        inputSnapshot,
+        runConfig,
+        taskConfig,
+        model,
+        count,
+        startedAt,
+        performanceStartedAt,
+    }: {
+        taskId: string;
+        workflow: CreativeWorkflow;
+        prompt: string;
+        inputSnapshot: Record<string, string>;
+        runConfig: AiConfig;
+        taskConfig: WorkflowGenerationConfig;
+        model: string;
+        count: number;
+        startedAt: number;
+        performanceStartedAt: number;
+    }) => {
         try {
-            const images = await Promise.all(Array.from({ length: count }, () => requestGeneration({ ...runConfig, count: "1" }, renderedPrompt)));
+            const images = await Promise.all(Array.from({ length: count }, () => requestGeneration({ ...runConfig, count: "1" }, prompt)));
             const flattened = images.flat();
             if (!flattened.length) throw new Error("接口没有返回图片");
-            const durationMs = performance.now() - startedAt;
+            const durationMs = performance.now() - performanceStartedAt;
             const storedImages = await Promise.all(
                 flattened.map(async (image) => {
                     const meta = await readImageMeta(image.dataUrl);
@@ -241,41 +314,67 @@ export default function WorkflowsPage() {
                 }),
             );
             const log = buildImageHistoryLog({
-                workflow: runningWorkflow,
-                prompt: renderedPrompt,
-                config: { ...runningWorkflow.config, model, imageModel: model, apiMode: runtime.apiMode },
+                workflow,
+                prompt,
+                config: taskConfig,
                 model,
                 images: storedImages,
                 durationMs,
-                inputs: { ...inputValues },
+                inputs: inputSnapshot,
             });
             await imageLogStore.setItem(log.id, serializeHistoryLog(log));
-            const now = Date.now();
-            const nextWorkflows = workflows.map((item) => (item.id === runningWorkflow.id ? { ...item, lastRunAt: now, updatedAt: now } : item));
-            await saveWorkflows(nextWorkflows);
-            setRunningWorkflow((value) => (value ? { ...value, lastRunAt: now, updatedAt: now } : value));
-            setRunResults((value) => [
-                ...storedImages.map((image) => ({
-                    id: nanoid(),
-                    workflowId: runningWorkflow.id,
-                    workflowName: runningWorkflow.name,
-                    prompt: renderedPrompt,
-                    imageUrl: image.dataUrl,
-                    storageKey: image.storageKey,
-                    width: image.width,
-                    height: image.height,
-                    bytes: image.bytes,
-                    mimeType: image.mimeType,
-                    durationMs,
-                    createdAt: now,
-                })),
-                ...value,
-            ]);
+            const finishedAt = Date.now();
+            setWorkflows((value) => {
+                const next = value.map((item) => (item.id === workflow.id ? { ...item, lastRunAt: finishedAt, updatedAt: finishedAt } : item)).sort((a, b) => b.updatedAt - a.updatedAt);
+                void workflowStore.setItem(WORKFLOW_STORE_KEY, next);
+                return next;
+            });
+            setRunningWorkflow((value) => (value?.id === workflow.id ? { ...value, lastRunAt: finishedAt, updatedAt: finishedAt } : value));
+            const nextResults = storedImages.map((image) => ({
+                id: nanoid(),
+                workflowId: workflow.id,
+                workflowName: workflow.name,
+                prompt,
+                imageUrl: image.dataUrl,
+                storageKey: image.storageKey,
+                width: image.width,
+                height: image.height,
+                bytes: image.bytes,
+                mimeType: image.mimeType,
+                durationMs,
+                createdAt: finishedAt,
+            }));
+            setWorkflowTasks((value) =>
+                value.map((task) =>
+                    task.id === taskId
+                        ? {
+                              ...task,
+                              status: "success",
+                              endedAt: finishedAt,
+                              durationMs,
+                              images: nextResults,
+                          }
+                        : task,
+                ),
+            );
+            setRunResults((value) => [...nextResults, ...value]);
             message.success("工作流运行完成，结果已写入生图历史");
         } catch (error) {
+            const finishedAt = Date.now();
+            setWorkflowTasks((value) =>
+                value.map((task) =>
+                    task.id === taskId
+                        ? {
+                              ...task,
+                              status: "failed",
+                              endedAt: finishedAt,
+                              durationMs: finishedAt - startedAt,
+                              error: error instanceof Error ? error.message : "工作流运行失败",
+                          }
+                        : task,
+                ),
+            );
             message.error(error instanceof Error ? error.message : "工作流运行失败");
-        } finally {
-            setRunning(false);
         }
     };
 
@@ -308,6 +407,31 @@ export default function WorkflowsPage() {
                         </div>
                     ) : null}
                 </section>
+
+                {workflowTasks.length ? (
+                    <section className="space-y-3">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                            <div className="flex items-center gap-2 text-base font-semibold">
+                                <LoaderCircle className={`size-4 ${runningTaskCount ? "animate-spin" : ""}`} />
+                                工作流任务
+                                <Tag className="m-0">{workflowTasks.length} 个</Tag>
+                                {runningTaskCount ? (
+                                    <Tag className="m-0" color="processing">
+                                        {runningTaskCount} 运行中
+                                    </Tag>
+                                ) : null}
+                            </div>
+                            <Button size="small" onClick={() => setWorkflowTasks((value) => value.filter((task) => task.status === "running"))}>
+                                清理已完成
+                            </Button>
+                        </div>
+                        <div className="grid grid-cols-1 gap-3 lg:grid-cols-2 2xl:grid-cols-3">
+                            {workflowTasks.map((task) => (
+                                <WorkflowTaskCard key={task.id} task={task} now={now} onCopyPrompt={() => void navigator.clipboard.writeText(task.prompt)} onDownload={(image, index) => saveAs(image.imageUrl, `workflow-task-${index + 1}.png`)} />
+                            ))}
+                        </div>
+                    </section>
+                ) : null}
 
                 {runResults.length ? (
                     <section className="space-y-3">
@@ -363,8 +487,8 @@ export default function WorkflowsPage() {
                                     {!runningWorkflow.variables.length ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="此工作流没有变量" /> : null}
                                 </div>
                             </div>
-                            <Button block type="primary" size="large" icon={<Play className="size-4" />} loading={running} onClick={() => void runWorkflow()}>
-                                运行工作流
+                            <Button block type="primary" size="large" icon={<Play className="size-4" />} onClick={() => void runWorkflow()}>
+                                启动任务
                             </Button>
                         </div>
                         <div className="space-y-3">
@@ -417,6 +541,81 @@ function WorkflowCard({ workflow, onRun, onEdit, onCopy, onDelete }: { workflow:
                     <Button size="small" icon={<FilePlus2 className="size-3.5" />} onClick={onCopy} />
                     <Button size="small" danger icon={<Trash2 className="size-3.5" />} onClick={onDelete} />
                 </div>
+            </div>
+        </article>
+    );
+}
+
+function WorkflowTaskCard({ task, now, onCopyPrompt, onDownload }: { task: WorkflowTask; now: number; onCopyPrompt: () => void; onDownload: (image: WorkflowRunResult, index: number) => void }) {
+    const elapsedMs = task.status === "running" ? now - task.startedAt : task.durationMs || (task.endedAt || task.startedAt) - task.startedAt;
+    const statusView = {
+        running: { label: "运行中", color: "processing", icon: <LoaderCircle className="size-4 animate-spin" /> },
+        success: { label: "成功", color: "success", icon: <CheckCircle2 className="size-4" /> },
+        failed: { label: "失败", color: "error", icon: <AlertCircle className="size-4" /> },
+    }[task.status];
+
+    return (
+        <article className="overflow-hidden rounded-lg border border-stone-200 bg-white dark:border-stone-800 dark:bg-stone-900">
+            <div className="flex items-start justify-between gap-3 border-b border-stone-200 p-3 dark:border-stone-800">
+                <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                        <span className="shrink-0 text-stone-500 dark:text-stone-400">{statusView.icon}</span>
+                        <div className="truncate font-medium">{task.workflowName}</div>
+                    </div>
+                    <div className="mt-1 flex flex-wrap gap-1">
+                        <Tag className="m-0" color={statusView.color}>
+                            {statusView.label}
+                        </Tag>
+                        <Tag className="m-0">{formatDuration(elapsedMs)}</Tag>
+                        <Tag className="m-0">{formatDate(task.startedAt)}</Tag>
+                    </div>
+                </div>
+                <Button size="small" icon={<Copy className="size-3.5" />} onClick={onCopyPrompt}>
+                    复制提示词
+                </Button>
+            </div>
+            <div className="space-y-3 p-3">
+                <div className="line-clamp-2 whitespace-pre-wrap text-sm text-stone-600 dark:text-stone-300">{task.prompt}</div>
+                <div className="grid grid-cols-2 gap-2 text-xs md:grid-cols-4">
+                    <InfoPill label="模型" value={task.model} />
+                    <InfoPill label="接口" value={task.apiMode === "responses" ? "Responses" : "Images"} />
+                    <InfoPill label="尺寸" value={task.config.size || "auto"} />
+                    <InfoPill label="数量" value={`${task.count} 张`} />
+                    <InfoPill label="质量" value={task.config.quality || "auto"} />
+                    <InfoPill label="格式" value={task.config.outputFormat || "png"} />
+                    <InfoPill label="超时" value={`${task.config.timeout || "600"}s`} />
+                    <InfoPill label="流式" value={task.config.streamImages ? `${task.config.streamPartialImages || "1"} 张` : "关闭"} />
+                </div>
+                {Object.keys(task.inputs).length ? (
+                    <div className="flex flex-wrap gap-1">
+                        {Object.entries(task.inputs)
+                            .filter(([, value]) => String(value).trim())
+                            .slice(0, 6)
+                            .map(([key, value]) => (
+                                <Tag key={key} className="m-0 max-w-full text-[10px]">
+                                    <span className="font-medium">{key}</span>: <span className="inline-block max-w-48 truncate align-bottom">{String(value)}</span>
+                                </Tag>
+                            ))}
+                    </div>
+                ) : null}
+                {task.error ? <div className="rounded-md bg-red-100 px-2.5 py-2 text-xs text-red-600 dark:bg-red-950/40 dark:text-red-300">{task.error}</div> : null}
+                {task.images.length ? (
+                    <div className="grid grid-cols-2 gap-2 md:grid-cols-3">
+                        {task.images.map((image, index) => (
+                            <div key={image.id} className="overflow-hidden rounded-md border border-stone-200 bg-stone-100 dark:border-stone-800 dark:bg-stone-950">
+                                <Image src={image.imageUrl} alt={`${task.workflowName} ${index + 1}`} className="aspect-[4/3] object-cover" />
+                                <div className="flex items-center justify-between gap-2 px-2 py-1.5 text-[10px] text-stone-500">
+                                    <span className="truncate">
+                                        {image.width}x{image.height} · {formatBytes(image.bytes)}
+                                    </span>
+                                    <Button size="small" icon={<Download className="size-3.5" />} onClick={() => onDownload(image, index)} />
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                ) : task.status === "running" ? (
+                    <div className="flex h-28 items-center justify-center rounded-md border border-dashed border-stone-300 text-sm text-stone-500 dark:border-stone-800">生成中 {formatDuration(elapsedMs)}</div>
+                ) : null}
             </div>
         </article>
     );
