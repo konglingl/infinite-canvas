@@ -964,6 +964,52 @@ func DownloadStorageObject(id string) (DownloadedStorageObject, error) {
 	if err != nil {
 		return DownloadedStorageObject{}, err
 	}
+
+	var provider model.StorageProvider
+	var ok bool
+
+	// 1. 尝试从创建者的用户配置中获取自定义 S3 存储配置
+	if object.CreatedBy != "" && object.CreatedBy != "anonymous" {
+		userConfig, found, err := repository.GetUserConfig(object.CreatedBy)
+		if err == nil && found && userConfig.StorageProvider != "" {
+			var providerInput StorageObjectProviderInput
+			if err := json.Unmarshal([]byte(userConfig.StorageProvider), &providerInput); err == nil {
+				provider = normalizeStorageProvider(model.StorageProvider{
+					Name:            providerInput.Name,
+					Type:            providerInput.Type,
+					Endpoint:        providerInput.Endpoint,
+					Region:          providerInput.Region,
+					Bucket:          providerInput.Bucket,
+					AccessKeyID:     providerInput.AccessKeyID,
+					SecretAccessKey: providerInput.SecretAccessKey,
+					PublicBaseURL:   providerInput.PublicBaseURL,
+					PathPrefix:      providerInput.PathPrefix,
+					Weight:          1,
+					Enabled:         true,
+					OwnerUserID:     object.CreatedBy,
+				})
+				ok = true
+			}
+		}
+	}
+
+	// 2. 尝试从系统管理员配置中读取 S3 存储配置
+	if !ok {
+		settings, err := repository.GetSettings()
+		if err == nil {
+			provider, ok = findSavedStorageProvider(model.StorageProvider{ID: object.ProviderID}, normalizePrivateStorageSetting(settings.Private.Storage).Providers, -1)
+		}
+	}
+
+	// 3. 如果成功解析出 Provider 配置，优先使用 S3 API 直接下载
+	if ok && provider.Endpoint != "" && provider.Bucket != "" && provider.AccessKeyID != "" && provider.SecretAccessKey != "" {
+		data, err := getS3Object(provider, object.ObjectKey)
+		if err == nil {
+			return DownloadedStorageObject{Object: object, Data: data}, nil
+		}
+	}
+
+	// 4. 降级方案：使用 HTTP GET 方式直接从 PublicURL 下载
 	if object.PublicURL != "" {
 		response, err := http.DefaultClient.Get(object.PublicURL)
 		if err != nil {
@@ -980,20 +1026,10 @@ func DownloadStorageObject(id string) (DownloadedStorageObject, error) {
 		}
 		return DownloadedStorageObject{Object: object, Data: data}, nil
 	}
-	settings, err := repository.GetSettings()
-	if err != nil {
-		return DownloadedStorageObject{}, err
-	}
-	provider, ok := findSavedStorageProvider(model.StorageProvider{ID: object.ProviderID}, normalizePrivateStorageSetting(settings.Private.Storage).Providers, -1)
-	if !ok {
-		return DownloadedStorageObject{}, errors.New("对象存储配置不存在")
-	}
-	data, err := getS3Object(provider, object.ObjectKey)
-	if err != nil {
-		return DownloadedStorageObject{}, err
-	}
-	return DownloadedStorageObject{Object: object, Data: data}, nil
+
+	return DownloadedStorageObject{}, errors.New("无法读取对象存储文件")
 }
+
 
 func selectStorageProvider(storage model.PrivateStorageSetting) (model.StorageProvider, error) {
 	var candidates []model.StorageProvider
