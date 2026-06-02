@@ -110,6 +110,47 @@ export const useAssetStore = create<AssetStore>()(
                             collectImageStorageKeys(projects, usedKeys);
                             collectMediaStorageKeys(projects, usedKeys);
 
+                            // 收集本地/云端生图历史与视频历史中的 storageKey，避免生成结果卡片失效
+                            try {
+                                const localforage = (await import("localforage")).default;
+                                const imageLogStore = localforage.createInstance({ name: "infinite-canvas", storeName: "image_generation_logs" });
+                                await imageLogStore.iterate((log: any) => {
+                                    if (log) {
+                                        if (Array.isArray(log.images)) {
+                                            log.images.forEach((img: any) => {
+                                                if (img && img.storageKey) usedKeys.add(img.storageKey);
+                                            });
+                                        }
+                                        if (Array.isArray(log.references)) {
+                                            log.references.forEach((ref: any) => {
+                                                if (ref && ref.storageKey) usedKeys.add(ref.storageKey);
+                                            });
+                                        }
+                                    }
+                                });
+                            } catch (e) {
+                                console.error("Error iterating image_generation_logs", e);
+                            }
+
+                            try {
+                                const localforage = (await import("localforage")).default;
+                                const videoLogStore = localforage.createInstance({ name: "infinite-canvas", storeName: "video_generation_logs" });
+                                await videoLogStore.iterate((log: any) => {
+                                    if (log) {
+                                        if (log.video && log.video.storageKey) {
+                                            usedKeys.add(log.video.storageKey);
+                                        }
+                                        if (Array.isArray(log.references)) {
+                                            log.references.forEach((ref: any) => {
+                                                if (ref && ref.storageKey) usedKeys.add(ref.storageKey);
+                                            });
+                                        }
+                                    }
+                                });
+                            } catch (e) {
+                                console.error("Error iterating video_generation_logs", e);
+                            }
+
                             // 若全站没有其他地方再引用此 storageKey，则执行真正的物理删除
                             if (!usedKeys.has(key)) {
                                 if (key.startsWith("image:") || key.startsWith("server:")) {
@@ -155,8 +196,43 @@ export const useAssetStore = create<AssetStore>()(
             cleanupImages: (extra) => {
                 window.setTimeout(async () => {
                     const { useCanvasStore } = await import("@/app/(user)/canvas/stores/use-canvas-store");
-                    await cleanupUnusedImages({ assets: get().assets, projects: useCanvasStore.getState().projects, extra });
-                    await cleanupUnusedMedia({ assets: get().assets, projects: useCanvasStore.getState().projects, extra });
+                    const logKeys: string[] = [];
+                    try {
+                        const localforage = (await import("localforage")).default;
+                        const imageLogStore = localforage.createInstance({ name: "infinite-canvas", storeName: "image_generation_logs" });
+                        await imageLogStore.iterate((log: any) => {
+                            if (log) {
+                                if (Array.isArray(log.images)) {
+                                    log.images.forEach((img: any) => {
+                                        if (img && img.storageKey) logKeys.push(img.storageKey);
+                                    });
+                                }
+                                if (Array.isArray(log.references)) {
+                                    log.references.forEach((ref: any) => {
+                                        if (ref && ref.storageKey) logKeys.push(ref.storageKey);
+                                    });
+                                }
+                            }
+                        });
+                        const videoLogStore = localforage.createInstance({ name: "infinite-canvas", storeName: "video_generation_logs" });
+                        await videoLogStore.iterate((log: any) => {
+                            if (log) {
+                                if (log.video && log.video.storageKey) {
+                                    logKeys.push(log.video.storageKey);
+                                }
+                                if (Array.isArray(log.references)) {
+                                    log.references.forEach((ref: any) => {
+                                        if (ref && ref.storageKey) logKeys.push(ref.storageKey);
+                                    });
+                                }
+                            }
+                        });
+                    } catch (e) {
+                        console.error("Error gathering log keys in cleanupImages", e);
+                    }
+
+                    await cleanupUnusedImages({ assets: get().assets, projects: useCanvasStore.getState().projects, extra, logKeys });
+                    await cleanupUnusedMedia({ assets: get().assets, projects: useCanvasStore.getState().projects, extra, logKeys });
                 }, 0);
             },
         }),

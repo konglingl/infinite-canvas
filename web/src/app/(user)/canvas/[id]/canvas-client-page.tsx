@@ -273,6 +273,7 @@ function InfiniteCanvasPage() {
     const [cropNodeId, setCropNodeId] = useState<string | null>(null);
     const [angleNodeId, setAngleNodeId] = useState<string | null>(null);
     const [previewNodeId, setPreviewNodeId] = useState<string | null>(null);
+    const [activeTool, setActiveTool] = useState<"hand" | "select">("hand");
     const [assistantCollapsed, setAssistantCollapsed] = useState(true);
     const [assistantMounted, setAssistantMounted] = useState(false);
     const [titleEditing, setTitleEditing] = useState(false);
@@ -891,7 +892,7 @@ function InfiniteCanvasPage() {
             if (pendingConnectionCreateRef.current) cancelPendingConnectionCreate();
             if (event.button !== 0) return;
 
-            if (!event.ctrlKey && !event.metaKey) {
+            if (activeTool !== "select" && !event.ctrlKey && !event.metaKey) {
                 setSelectionBox(null);
                 setSelectedNodeIds(new Set());
                 setSelectedConnectionId(null);
@@ -915,7 +916,7 @@ function InfiniteCanvasPage() {
 
             setSelectedConnectionId(null);
         },
-        [cancelPendingConnectionCreate, screenToCanvas],
+        [cancelPendingConnectionCreate, screenToCanvas, activeTool],
     );
 
     const handleNodeMouseDown = useCallback((event: ReactMouseEvent, nodeId: string) => {
@@ -1110,45 +1111,61 @@ function InfiniteCanvasPage() {
     }, [finishNodeDrag, handleGlobalMouseMove, handleGlobalMouseUp, handleGlobalPointerMove]);
 
     const createImageFileNode = useCallback(async (file: File, position: Position) => {
-        const image = await uploadImage(file);
-        const size = fitNodeSize(image.width, image.height);
-        const id = `image-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-        const newNode: CanvasNodeData = {
-            id,
-            type: CanvasNodeType.Image,
-            title: file.name,
-            position: { x: position.x - size.width / 2, y: position.y - size.height / 2 },
-            width: size.width,
-            height: size.height,
-            metadata: imageMetadata(image),
-        };
-
-        setNodes((prev) => [...prev, newNode]);
-        setSelectedNodeIds(new Set([id]));
-        setSelectedConnectionId(null);
-        setDialogNodeId(id);
-    }, []);
-
-    const createVideoFileNode = useCallback(async (file: File, position: Position) => {
-        const video = await uploadMediaFile(file, "video");
-        const size = fitNodeSize(video.width || 1280, video.height || 720, VIDEO_NODE_MAX_WIDTH, VIDEO_NODE_MAX_HEIGHT);
-        const id = `video-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-        setNodes((prev) => [
-            ...prev,
-            {
+        const hideLoading = message.loading("正在上传图片...", 0);
+        try {
+            const image = await uploadImage(file);
+            const size = fitNodeSize(image.width, image.height);
+            const id = `image-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+            const newNode: CanvasNodeData = {
                 id,
-                type: CanvasNodeType.Video,
+                type: CanvasNodeType.Image,
                 title: file.name,
                 position: { x: position.x - size.width / 2, y: position.y - size.height / 2 },
                 width: size.width,
                 height: size.height,
-                metadata: videoMetadata(video),
-            },
-        ]);
-        setSelectedNodeIds(new Set([id]));
-        setSelectedConnectionId(null);
-        setDialogNodeId(id);
-    }, []);
+                metadata: imageMetadata(image),
+            };
+
+            setNodes((prev) => [...prev, newNode]);
+            setSelectedNodeIds(new Set([id]));
+            setSelectedConnectionId(null);
+            setDialogNodeId(id);
+        } catch (error) {
+            console.error("Upload image node failed:", error);
+            message.error("图片上传失败");
+        } finally {
+            hideLoading();
+        }
+    }, [message]);
+
+    const createVideoFileNode = useCallback(async (file: File, position: Position) => {
+        const hideLoading = message.loading("正在上传视频...", 0);
+        try {
+            const video = await uploadMediaFile(file, "video");
+            const size = fitNodeSize(video.width || 1280, video.height || 720, VIDEO_NODE_MAX_WIDTH, VIDEO_NODE_MAX_HEIGHT);
+            const id = `video-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+            setNodes((prev) => [
+                ...prev,
+                {
+                    id,
+                    type: CanvasNodeType.Video,
+                    title: file.name,
+                    position: { x: position.x - size.width / 2, y: position.y - size.height / 2 },
+                    width: size.width,
+                    height: size.height,
+                    metadata: videoMetadata(video),
+                },
+            ]);
+            setSelectedNodeIds(new Set([id]));
+            setSelectedConnectionId(null);
+            setDialogNodeId(id);
+        } catch (error) {
+            console.error("Upload video node failed:", error);
+            message.error("视频上传失败");
+        } finally {
+            hideLoading();
+        }
+    }, [message]);
 
     const createTextNodeFromClipboard = useCallback(
         (text: string) => {
@@ -1362,10 +1379,27 @@ function InfiniteCanvasPage() {
         setNodes((prev) => prev.map((node) => (node.id === nodeId ? applyNodeConfigPatch(node, patch) : node)));
     }, []);
 
-    const downloadNodeImage = useCallback((node: CanvasNodeData) => {
+    const downloadNodeImage = useCallback(async (node: CanvasNodeData) => {
         if ((node.type !== CanvasNodeType.Image && node.type !== CanvasNodeType.Video) || !node.metadata?.content) return;
-        saveAs(node.metadata.content, `canvas-${node.type}-${node.id}.${node.type === CanvasNodeType.Video ? "mp4" : imageExtension(node.metadata.content)}`);
-    }, []);
+        const url = node.metadata.content;
+        const filename = `canvas-${node.type}-${node.id}.${node.type === CanvasNodeType.Video ? "mp4" : imageExtension(url)}`;
+
+        if (url.startsWith("data:") || url.startsWith("blob:")) {
+            saveAs(url, filename);
+        } else {
+            const hideLoading = message.loading("正在下载媒体文件...", 0);
+            try {
+                const response = await fetch(url.startsWith("http") ? `/api/proxy-image?url=${encodeURIComponent(url)}` : url);
+                const blob = await response.blob();
+                saveAs(blob, filename);
+            } catch (error) {
+                console.error("Canvas node download error, falling back to open:", error);
+                saveAs(url, filename);
+            } finally {
+                hideLoading();
+            }
+        }
+    }, [message]);
 
     const saveNodeAsset = useCallback(
         async (node: CanvasNodeData) => {
@@ -1427,7 +1461,7 @@ function InfiniteCanvasPage() {
         const child: CanvasNodeData = {
             id: childId,
             type: CanvasNodeType.Image,
-            title: "Cropped Image",
+            title: node.title ? `裁剪 - ${node.title}` : "裁剪图片",
             position: { x: node.position.x + node.width + 96, y: node.position.y },
             width,
             height: width * (image.height / image.width),
@@ -1513,20 +1547,65 @@ function InfiniteCanvasPage() {
             if (!file || (!file.type.startsWith("image/") && !file.type.startsWith("video/"))) return;
 
             if (target?.nodeId) {
-                if (file.type.startsWith("video/")) {
-                    const video = await uploadMediaFile(file, "video");
-                    const nextSize = fitNodeSize(video.width || 1280, video.height || 720, VIDEO_NODE_MAX_WIDTH, VIDEO_NODE_MAX_HEIGHT);
+                const hideLoading = message.loading(file.type.startsWith("video/") ? "正在上传视频..." : "正在上传图片...", 0);
+                try {
+                    if (file.type.startsWith("video/")) {
+                        const video = await uploadMediaFile(file, "video");
+                        const nextSize = fitNodeSize(video.width || 1280, video.height || 720, VIDEO_NODE_MAX_WIDTH, VIDEO_NODE_MAX_HEIGHT);
+                        setNodes((prev) =>
+                            prev.map((node) =>
+                                node.id === target.nodeId
+                                    ? {
+                                          ...node,
+                                          type: CanvasNodeType.Video,
+                                          title: file.name,
+                                          position: { x: node.position.x + node.width / 2 - nextSize.width / 2, y: node.position.y + node.height / 2 - nextSize.height / 2 },
+                                          width: nextSize.width,
+                                          height: nextSize.height,
+                                          metadata: { ...node.metadata, ...videoMetadata(video), errorDetails: undefined },
+                                      }
+                                    : node,
+                            ),
+                        );
+                        setSelectedNodeIds(new Set([target.nodeId]));
+                        setSelectedConnectionId(null);
+                        setDialogNodeId(target.nodeId);
+                        uploadTargetRef.current = null;
+                        event.target.value = "";
+                        return;
+                    }
+                    const image = await uploadImage(file);
+                    const size = fitNodeSize(image.width, image.height);
                     setNodes((prev) =>
                         prev.map((node) =>
                             node.id === target.nodeId
                                 ? {
                                       ...node,
-                                      type: CanvasNodeType.Video,
+                                      type: CanvasNodeType.Image,
                                       title: file.name,
-                                      position: { x: node.position.x + node.width / 2 - nextSize.width / 2, y: node.position.y + node.height / 2 - nextSize.height / 2 },
-                                      width: nextSize.width,
-                                      height: nextSize.height,
-                                      metadata: { ...node.metadata, ...videoMetadata(video), errorDetails: undefined },
+                                      width: size.width,
+                                      height: size.height,
+                                      metadata: {
+                                          ...node.metadata,
+                                          ...imageMetadata(image),
+                                          errorDetails: undefined,
+                                          freeResize: false,
+                                          isBatchRoot: undefined,
+                                          batchRootId: undefined,
+                                          batchChildIds: undefined,
+                                          batchUsesReferenceImages: undefined,
+                                          generationType: undefined,
+                                          model: undefined,
+                                          size: undefined,
+                                          quality: undefined,
+                                          outputFormat: undefined,
+                                          outputCompression: undefined,
+                                          moderation: undefined,
+                                          count: undefined,
+                                          references: undefined,
+                                          primaryImageId: undefined,
+                                          imageBatchExpanded: undefined,
+                                      },
                                   }
                                 : node,
                         ),
@@ -1534,58 +1613,25 @@ function InfiniteCanvasPage() {
                     setSelectedNodeIds(new Set([target.nodeId]));
                     setSelectedConnectionId(null);
                     setDialogNodeId(target.nodeId);
+                } catch (err) {
+                    console.error("Canvas media upload error:", err);
+                    message.error("媒体文件上传失败");
+                } finally {
+                    hideLoading();
                     uploadTargetRef.current = null;
                     event.target.value = "";
-                    return;
                 }
-                const image = await uploadImage(file);
-                const size = fitNodeSize(image.width, image.height);
-                setNodes((prev) =>
-                    prev.map((node) =>
-                        node.id === target.nodeId
-                            ? {
-                                  ...node,
-                                  type: CanvasNodeType.Image,
-                                  title: file.name,
-                                  width: size.width,
-                                  height: size.height,
-                                  metadata: {
-                                      ...node.metadata,
-                                      ...imageMetadata(image),
-                                      errorDetails: undefined,
-                                      freeResize: false,
-                                      isBatchRoot: undefined,
-                                      batchRootId: undefined,
-                                      batchChildIds: undefined,
-                                      batchUsesReferenceImages: undefined,
-                                      generationType: undefined,
-                                      model: undefined,
-                                      size: undefined,
-                                      quality: undefined,
-                                      outputFormat: undefined,
-                                      outputCompression: undefined,
-                                      moderation: undefined,
-                                      count: undefined,
-                                      references: undefined,
-                                      primaryImageId: undefined,
-                                      imageBatchExpanded: undefined,
-                                  },
-                              }
-                            : node,
-                    ),
-                );
-                setSelectedNodeIds(new Set([target.nodeId]));
-                setSelectedConnectionId(null);
-                setDialogNodeId(target.nodeId);
             } else {
-                const position = target?.position || screenToCanvas((containerRef.current?.getBoundingClientRect().left || 0) + size.width / 2, (containerRef.current?.getBoundingClientRect().top || 0) + size.height / 2);
-                void (file.type.startsWith("video/") ? createVideoFileNode(file, position) : createImageFileNode(file, position));
+                try {
+                    const position = target?.position || screenToCanvas((containerRef.current?.getBoundingClientRect().left || 0) + size.width / 2, (containerRef.current?.getBoundingClientRect().top || 0) + size.height / 2);
+                    await (file.type.startsWith("video/") ? createVideoFileNode(file, position) : createImageFileNode(file, position));
+                } finally {
+                    uploadTargetRef.current = null;
+                    event.target.value = "";
+                }
             }
-
-            uploadTargetRef.current = null;
-            event.target.value = "";
         },
-        [createImageFileNode, createVideoFileNode, screenToCanvas, size.height, size.width],
+        [createImageFileNode, createVideoFileNode, screenToCanvas, size.height, size.width, message],
     );
 
     const handleDrop = useCallback(
@@ -2213,6 +2259,7 @@ function InfiniteCanvasPage() {
                     containerRef={containerRef}
                     viewport={viewport}
                     backgroundMode={backgroundMode}
+                    activeTool={activeTool}
                     onViewportChange={(next) => {
                         setViewport(next);
                         setContextMenu(null);
@@ -2367,6 +2414,8 @@ function InfiniteCanvasPage() {
                 />
 
                 <CanvasToolbar
+                    activeTool={activeTool}
+                    onActiveToolChange={setActiveTool}
                     selectedCount={selectedNodeIds.size}
                     canUndo={historyState.canUndo}
                     canRedo={historyState.canRedo}
@@ -2417,7 +2466,7 @@ function InfiniteCanvasPage() {
 
                 <CanvasNodeInfoModal node={infoNode} open={Boolean(infoNode)} onClose={() => setInfoNodeId(null)} />
 
-                {cropNode?.metadata?.content ? <CanvasNodeCropDialog dataUrl={cropNode.metadata.content} open={Boolean(cropNode)} onClose={() => setCropNodeId(null)} onConfirm={(crop) => void cropImageNode(cropNode!, crop)} /> : null}
+                {cropNode?.metadata?.content ? <CanvasNodeCropDialog dataUrl={cropNode.metadata.content} open={Boolean(cropNode)} onClose={() => setCropNodeId(null)} onConfirm={async (crop) => { await cropImageNode(cropNode!, crop); }} /> : null}
 
                 {angleNode?.metadata?.content ? <CanvasNodeAngleDialog dataUrl={angleNode.metadata.content} open={Boolean(angleNode)} onClose={() => setAngleNodeId(null)} onConfirm={(params) => void generateAngleNode(angleNode!, params)} /> : null}
 
@@ -2425,9 +2474,9 @@ function InfiniteCanvasPage() {
                     <Image
                         src={previewNode?.metadata?.content || undefined}
                         preview={{
-                            visible: Boolean(previewNode?.metadata?.content),
-                            onVisibleChange: (visible) => {
-                                if (!visible) setPreviewNodeId(null);
+                            open: Boolean(previewNode?.metadata?.content),
+                            onOpenChange: (open) => {
+                                if (!open) setPreviewNodeId(null);
                             },
                         }}
                     />

@@ -1,10 +1,11 @@
 "use client";
 
-import { Copy, FolderPlus, Search } from "lucide-react";
+import { Copy, Download, FolderPlus, Search } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { App, Button, Card, Drawer, Empty, Image, Input, Pagination, Spin, Tag, Typography } from "antd";
+import { App, Button, Card, Drawer, Empty, Image, Input, Modal, Pagination, Spin, Tag, Typography } from "antd";
 import axios from "axios";
+import { saveAs } from "file-saver";
 
 import { useCopyText } from "@/hooks/use-copy-text";
 import { cn } from "@/lib/utils";
@@ -22,6 +23,8 @@ export default function AssetLibraryPage() {
     const [selectedTags, setSelectedTags] = useState<string[]>([]);
     const [page, setPage] = useState(1);
     const [selectedAsset, setSelectedAsset] = useState<AssetLibraryItem | null>(null);
+    const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null);
+    const [previewVideoUrl, setPreviewVideoUrl] = useState<string | null>(null);
     const addAsset = useAssetStore((state) => state.addAsset);
 
     const query = useQuery({
@@ -75,6 +78,28 @@ export default function AssetLibraryPage() {
             message.success("已加入我的素材");
         } catch {
             message.error("加入失败");
+        }
+    };
+
+    const downloadLibraryAsset = async (asset: AssetLibraryItem) => {
+        if (asset.type !== "image" && asset.type !== "video") return;
+        const url = asset.url;
+        const filename = `${asset.title || "library-asset"}.${url.split(".").pop()?.split("?")[0] || "png"}`;
+
+        if (url.startsWith("data:") || url.startsWith("blob:")) {
+            saveAs(url, filename);
+        } else {
+            const hideLoading = message.loading("正在下载媒体文件...", 0);
+            try {
+                const response = await fetch(url.startsWith("http") ? `/api/proxy-image?url=${encodeURIComponent(url)}` : url);
+                const blob = await response.blob();
+                saveAs(blob, filename);
+            } catch (error) {
+                console.error("Library asset download error, falling back to open:", error);
+                saveAs(url, filename);
+            } finally {
+                hideLoading();
+            }
         }
     };
 
@@ -164,7 +189,16 @@ export default function AssetLibraryPage() {
                 <div className="mx-auto flex max-w-7xl flex-col gap-5">
                     <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 2xl:grid-cols-5">
                         {items.map((asset) => (
-                            <LibraryCard key={asset.id} asset={asset} onOpen={() => setSelectedAsset(asset)} onAdd={() => void saveToMyAssets(asset)} />
+                            <LibraryCard
+                                key={asset.id}
+                                asset={asset}
+                                onOpen={() => setSelectedAsset(asset)}
+                                onAdd={() => void saveToMyAssets(asset)}
+                                onCopy={(a) => copyText(a.content, "文本已复制")}
+                                onPreviewImage={setPreviewImageUrl}
+                                onPlayVideo={setPreviewVideoUrl}
+                                onDownload={(a) => void downloadLibraryAsset(a)}
+                            />
                         ))}
                     </div>
 
@@ -213,6 +247,11 @@ export default function AssetLibraryPage() {
                                     复制链接
                                 </Button>
                             ) : null}
+                            {selectedAsset.type !== "text" ? (
+                                <Button type="primary" icon={<Download className="size-4" />} onClick={() => void downloadLibraryAsset(selectedAsset)}>
+                                    下载资源
+                                </Button>
+                            ) : null}
                             <Button icon={<FolderPlus className="size-4" />} onClick={() => void saveToMyAssets(selectedAsset)}>
                                 加入我的素材
                             </Button>
@@ -220,32 +259,100 @@ export default function AssetLibraryPage() {
                     </div>
                 ) : null}
             </Drawer>
+
+            {/* 隐藏的图片全屏预览器 */}
+            <div className="hidden">
+                <Image
+                    src={previewImageUrl || undefined}
+                    preview={{
+                        open: Boolean(previewImageUrl),
+                        onOpenChange: (open) => {
+                            if (!open) setPreviewImageUrl(null);
+                        },
+                    }}
+                />
+            </div>
+
+            {/* 视频 Modal 播放器 */}
+            <Modal
+                open={Boolean(previewVideoUrl)}
+                onCancel={() => setPreviewVideoUrl(null)}
+                footer={null}
+                destroyOnHidden
+                centered
+                width={800}
+                styles={{
+                    body: {
+                        padding: 0,
+                        backgroundColor: "#000",
+                        display: "flex",
+                        justifyContent: "center",
+                        alignItems: "center",
+                        minHeight: 300,
+                    },
+                }}
+            >
+                {previewVideoUrl && (
+                    <video src={previewVideoUrl} controls autoPlay className="max-h-[70vh] max-w-full rounded" />
+                )}
+            </Modal>
         </div>
     );
 }
 
-function LibraryCard({ asset, onOpen, onAdd }: { asset: AssetLibraryItem; onOpen: () => void; onAdd: () => void }) {
+function LibraryCard({
+    asset,
+    onOpen,
+    onAdd,
+    onCopy,
+    onPreviewImage,
+    onPlayVideo,
+    onDownload,
+}: {
+    asset: AssetLibraryItem;
+    onOpen: () => void;
+    onAdd: () => void;
+    onCopy: (asset: AssetLibraryItem) => void;
+    onPreviewImage: (url: string) => void;
+    onPlayVideo: (url: string) => void;
+    onDownload: (asset: AssetLibraryItem) => void;
+}) {
     const cover = asset.coverUrl;
+
+    const handleCardClick = () => {
+        if (asset.type === "text") {
+            onCopy(asset);
+        } else if (asset.type === "image") {
+            onPreviewImage(asset.url || asset.coverUrl);
+        } else if (asset.type === "video") {
+            onPlayVideo(asset.url);
+        }
+    };
+
     return (
         <Card
             hoverable
             className="overflow-hidden"
             styles={{ body: { padding: 0 } }}
             cover={
-                <button type="button" className="block w-full text-left" onClick={onOpen}>
+                <button type="button" className="block w-full text-left" onClick={handleCardClick}>
                     {cover ? (
                         <img src={cover} alt={asset.title} className="aspect-[4/3] w-full object-cover" />
                     ) : (
-                        <div className="flex aspect-[4/3] items-center justify-center bg-stone-100 p-5 text-center text-sm leading-6 text-stone-600 dark:bg-stone-900 dark:text-stone-300">{asset.content || "暂无封面"}</div>
+                        <div className="flex aspect-[4/3] items-center justify-center bg-stone-100 p-5 text-center text-sm leading-6 text-stone-600 dark:bg-stone-900 dark:text-stone-300">
+                            {asset.type === "text" ? asset.content : "暂无封面"}
+                        </div>
                     )}
                 </button>
             }
         >
-            <button type="button" className="block w-full text-left" onClick={onOpen}>
+            <button type="button" className="block w-full text-left" onClick={handleCardClick}>
                 <div className="p-4">
                     <div className="flex items-start justify-between gap-3">
                         <h2 className="line-clamp-1 text-sm font-semibold text-stone-950 dark:text-stone-100">{asset.title}</h2>
-                        <Tag className="m-0 shrink-0 text-[11px]">{asset.type === "image" ? "图片" : "文本"}</Tag>
+                        <Tag className="m-0 shrink-0 text-[11px]">
+                            {asset.type === "image" ? "图片" : asset.type === "video" ? "视频" : "文本"}
+                        </Tag>
                     </div>
                     <Typography.Paragraph type="secondary" ellipsis={{ rows: 3 }} className="!mb-0 !mt-2 !text-xs !leading-5">
                         {asset.type === "text" ? asset.content : asset.url}
@@ -267,6 +374,9 @@ function LibraryCard({ asset, onOpen, onAdd }: { asset: AssetLibraryItem; onOpen
                 <Button size="small" icon={<FolderPlus className="size-3.5" />} onClick={onAdd}>
                     加入我的素材
                 </Button>
+                {asset.type !== "text" && (
+                    <Button size="small" icon={<Download className="size-3.5" />} onClick={() => onDownload(asset)} />
+                )}
             </div>
         </Card>
     );

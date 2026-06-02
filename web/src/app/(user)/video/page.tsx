@@ -24,7 +24,7 @@ import {
     VideoIcon,
 } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { App, Button, Checkbox, Empty, Input, Modal, Segmented, Tag, Typography } from "antd";
+import { App, Button, Checkbox, Empty, Image, Input, Modal, Segmented, Tag, Typography } from "antd";
 import localforage from "localforage";
 import { nanoid } from "nanoid";
 import { saveAs } from "file-saver";
@@ -129,6 +129,7 @@ export default function VideoPage() {
     const isUserReady = useUserStore((state) => state.isReady);
     const [prompt, setPrompt] = useState("");
     const [references, setReferences] = useState<ReferenceImage[]>([]);
+    const [uploadingCount, setUploadingCount] = useState(0);
     const [results, setResults] = useState<GenerationResult[]>([]);
     const [logs, setLogs] = useState<GenerationLog[]>([]);
     const [workbenchLayout, setWorkbenchLayoutState] = useState<WorkbenchLayout>("bottom");
@@ -185,6 +186,7 @@ export default function VideoPage() {
     const addReferences = async (files?: FileList | null) => {
         const imageFiles = Array.from(files || []).filter((file) => file.type.startsWith("image/"));
         if (!imageFiles.length) return;
+        setUploadingCount(imageFiles.length);
         const hideLoading = message.loading("正在上传参考图...", 0);
         try {
             const nextReferences = await Promise.all(
@@ -199,6 +201,7 @@ export default function VideoPage() {
             message.error(error instanceof Error ? `上传参考图失败：${error.message}` : "上传参考图失败");
         } finally {
             hideLoading();
+            setUploadingCount(0);
         }
     };
 
@@ -210,6 +213,7 @@ export default function VideoPage() {
                 message.error("剪切板里没有可读取的图片");
                 return;
             }
+            setUploadingCount(blobs.length);
             const hideLoading = message.loading("正在上传并读取参考图...", 0);
             try {
                 const nextReferences = await Promise.all(
@@ -222,9 +226,11 @@ export default function VideoPage() {
                 message.success(`已成功上传并读取 ${nextReferences.length} 张参考图`);
             } finally {
                 hideLoading();
+                setUploadingCount(0);
             }
         } catch {
             message.error("剪切板里没有可读取的图片");
+            setUploadingCount(0);
         }
     };
 
@@ -569,6 +575,7 @@ export default function VideoPage() {
                             onGenerate={() => void generate()}
                             bottomSettingsCollapsed={bottomSettingsCollapsed}
                             setBottomSettingsCollapsed={setBottomSettingsCollapsed}
+                            uploadingCount={uploadingCount}
                         />
                         <ResultsPanel
                             results={results}
@@ -641,6 +648,7 @@ export default function VideoPage() {
                             onGenerate={() => void generate()}
                             bottomSettingsCollapsed={bottomSettingsCollapsed}
                             setBottomSettingsCollapsed={setBottomSettingsCollapsed}
+                            uploadingCount={uploadingCount}
                         />
                     </>
                 )}
@@ -690,6 +698,7 @@ function WorkbenchPanel({
     onGenerate,
     bottomSettingsCollapsed,
     setBottomSettingsCollapsed,
+    uploadingCount,
 }: {
     layout: WorkbenchLayout;
     currentLayout: WorkbenchLayout;
@@ -715,6 +724,7 @@ function WorkbenchPanel({
     onGenerate: () => void;
     bottomSettingsCollapsed: boolean;
     setBottomSettingsCollapsed: (value: boolean) => void;
+    uploadingCount: number;
 }) {
     if (layout === "bottom") {
         return (
@@ -773,7 +783,7 @@ function WorkbenchPanel({
                                 {pendingCount ? `${pendingCount} 生成中` : "开始创作"}
                             </Button>
                         </div>
-                        {references.length ? <ReferenceStrip className="mt-3" references={references} compact onRemoveReference={onRemoveReference} /> : null}
+                        {references.length || uploadingCount > 0 ? <ReferenceStrip className="mt-3" references={references} compact onRemoveReference={onRemoveReference} uploadingCount={uploadingCount} /> : null}
                     </div>
                 </div>
             </div>
@@ -819,7 +829,7 @@ function WorkbenchPanel({
                                 从素材选择
                             </Button>
                         </div>
-                        <ReferenceStrip references={references} onRemoveReference={onRemoveReference} />
+                        <ReferenceStrip references={references} onRemoveReference={onRemoveReference} uploadingCount={uploadingCount} />
                     </div>
                 </CollapsibleWorkbenchSection>
 
@@ -963,7 +973,7 @@ function CollapsibleWorkbenchSection({ title, count, collapsed, summary, childre
     );
 }
 
-function ReferenceStrip({ references, compact = false, className = "", onRemoveReference }: { references: ReferenceImage[]; compact?: boolean; className?: string; onRemoveReference: (id: string) => void }) {
+function ReferenceStrip({ references, compact = false, className = "", onRemoveReference, uploadingCount = 0 }: { references: ReferenceImage[]; compact?: boolean; className?: string; onRemoveReference: (id: string) => void; uploadingCount?: number }) {
     return (
         <div
             className={`hover-scrollbar hover-scrollbar-hint flex w-full min-w-0 max-w-full gap-2 overflow-x-scroll overflow-y-hidden rounded-lg border border-dashed border-stone-300 p-2 overscroll-x-contain dark:border-stone-700 ${compact ? "min-h-14" : "min-h-24 pb-3"} ${className}`}
@@ -975,13 +985,26 @@ function ReferenceStrip({ references, compact = false, className = "", onRemoveR
         >
             {references.map((item) => (
                 <div key={item.id} className={`${compact ? "size-12" : "size-20"} group relative shrink-0 overflow-hidden rounded-md border border-stone-200 dark:border-stone-800`}>
-                    <img src={item.dataUrl || undefined} alt={item.name} className="size-full object-cover" />
-                    <button type="button" className="absolute right-1 top-1 hidden size-6 items-center justify-center rounded bg-black/60 text-white group-hover:flex" onClick={() => onRemoveReference(item.id)} aria-label="移除参考图">
+                    <Image
+                        src={item.dataUrl || undefined}
+                        alt={item.name}
+                        className="size-full object-cover cursor-pointer"
+                        style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                        preview={{
+                            mask: "点击预览",
+                        }}
+                    />
+                    <button type="button" className="absolute right-1 top-1 hidden z-10 size-6 items-center justify-center rounded bg-black/60 text-white group-hover:flex" onClick={() => onRemoveReference(item.id)} aria-label="移除参考图">
                         <Trash2 className="size-3.5" />
                     </button>
                 </div>
             ))}
-            {!references.length ? <div className="flex min-w-full items-center justify-center text-sm text-stone-500">暂无参考图</div> : null}
+            {Array.from({ length: uploadingCount }).map((_, i) => (
+                <div key={`loading-${i}`} className={`${compact ? "size-12" : "size-20"} shrink-0 flex items-center justify-center rounded-md border border-stone-200 dark:border-stone-800 bg-stone-100/50 dark:bg-stone-900/50`}>
+                    <LoaderCircle className="size-5 animate-spin text-stone-400" />
+                </div>
+            ))}
+            {!references.length && !uploadingCount ? <div className="flex min-w-full items-center justify-center text-sm text-stone-500">暂无参考图</div> : null}
         </div>
     );
 }

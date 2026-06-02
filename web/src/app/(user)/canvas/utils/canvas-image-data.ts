@@ -76,9 +76,15 @@ function drawCrop(image: HTMLImageElement, sx: number, sy: number, sw: number, s
 }
 
 function loadImage(dataUrl: string) {
-    return new Promise<HTMLImageElement>((resolve) => {
+    return new Promise<HTMLImageElement>((resolve, reject) => {
         const image = new Image();
+        let src = dataUrl;
+        if (dataUrl.startsWith("http")) {
+            src = `/api/proxy-image?url=${encodeURIComponent(dataUrl)}`;
+            image.crossOrigin = "anonymous";
+        }
         image.onload = () => resolve(image);
-        image.src = dataUrl;
+        image.onerror = (err) => reject(err);
+        image.src = src;
     });
 }
