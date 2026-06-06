@@ -44,6 +44,13 @@ export default function AdminCreditLogsPage() {
             render: (_, item) => <Typography.Text copyable>{item.userId}</Typography.Text>,
         },
         {
+            title: "用户昵称",
+            dataIndex: "userDisplayName",
+            width: 160,
+            ellipsis: true,
+            render: (_, item) => item.userDisplayName || "-",
+        },
+        {
             title: "类型",
             dataIndex: "type",
             width: 140,
@@ -91,14 +98,21 @@ export default function AdminCreditLogsPage() {
     ];
 
     return (
-        <main style={{ padding: 24 }}>
-            <Space direction="vertical" size={16} style={{ width: "100%" }}>
+        <main className="p-3 md:p-6">
+            <Space orientation="vertical" size={16} style={{ width: "100%" }}>
                 <Card variant="borderless">
                     <Form layout="vertical">
                         <Row gutter={16} align="bottom">
                             <Col flex="360px">
                                 <Form.Item label="关键词">
-                                    <Input.Search value={keywordText} placeholder="搜索用户 ID、类型、备注或关联 ID" allowClear enterButton={<SearchOutlined />} onSearch={() => searchLogs(keywordText)} onChange={(event) => setKeywordText(event.target.value)} />
+                                    <Input.Search
+                                        value={keywordText}
+                                        placeholder="搜索用户 ID、类型、备注或关联 ID"
+                                        allowClear
+                                        enterButton={<SearchOutlined />}
+                                        onSearch={() => searchLogs(keywordText)}
+                                        onChange={(event) => setKeywordText(event.target.value)}
+                                    />
                                 </Form.Item>
                             </Col>
                             <Col flex="none">
@@ -129,6 +143,7 @@ export default function AdminCreditLogsPage() {
                     search={false}
                     defaultSize="middle"
                     tableLayout="fixed"
+                    scroll={{ x: 1100 }}
                     cardProps={{ variant: "borderless" }}
                     headerTitle={
                         <Space>

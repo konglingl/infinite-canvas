@@ -32,7 +32,8 @@ export async function exportAssets(assets: Asset[]) {
             const blob = asset.kind === "image" ? await getImageBlob(storageKey) : await getMediaBlob(storageKey);
             if (!blob) return;
             const path = `files/${safeFileName(storageKey)}.${fileExtension(blob.type, asset.kind)}`;
-            files.push({ storageKey, path, mimeType: blob.type || asset.data.mimeType, bytes: blob.size });
+            const fallbackMimeType = asset.kind === "image" || asset.kind === "video" ? asset.data.mimeType : "application/octet-stream";
+            files.push({ storageKey, path, mimeType: blob.type || fallbackMimeType, bytes: blob.size });
             zipFiles.push({ name: path, data: blob });
         }),
     );

@@ -81,8 +81,8 @@ export default function AdminAssetsPage() {
             width: 180,
             render: (_, item) => (
                 <Space size={[4, 4]} wrap>
-                    {(item.tags || []).slice(0, 3).map((tag) => (
-                        <Tag key={tag}>{tag}</Tag>
+                    {(item.tags || []).slice(0, 3).map((tag, index) => (
+                        <Tag key={`${tag}-${index}`}>{tag}</Tag>
                     ))}
                 </Space>
             ),
@@ -115,7 +115,7 @@ export default function AdminAssetsPage() {
     ];
 
     return (
-        <main style={{ padding: 24 }}>
+        <main className="p-3 md:p-6">
             <Flex vertical gap={16}>
                 <Card variant="borderless">
                     <Form layout="vertical">
@@ -163,6 +163,7 @@ export default function AdminAssetsPage() {
                     search={false}
                     defaultSize="middle"
                     tableLayout="fixed"
+                    scroll={{ x: 1120 }}
                     cardProps={{ variant: "borderless" }}
                     headerTitle={
                         <Space>
@@ -232,8 +233,8 @@ export default function AdminAssetsPage() {
                                 <Space wrap>
                                     <Tag>{detailAsset.type === "image" ? "图片" : "文本"}</Tag>
                                     {detailAsset.category ? <Tag>{detailAsset.category}</Tag> : null}
-                                    {(detailAsset.tags || []).map((tag) => (
-                                        <Tag key={tag}>{tag}</Tag>
+                                    {(detailAsset.tags || []).map((tag, index) => (
+                                        <Tag key={`${tag}-${index}`}>{tag}</Tag>
                                     ))}
                                 </Space>
                             </Flex>

@@ -49,6 +49,8 @@ export default function AssetsPage() {
     const [editingAsset, setEditingAsset] = useState<Asset | null>(null);
     const [isAssetOpen, setIsAssetOpen] = useState(false);
     const [previewAsset, setPreviewAsset] = useState<Asset | null>(null);
+    const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null);
+    const [previewVideoUrl, setPreviewVideoUrl] = useState<string | null>(null);
     const [deletingAsset, setDeletingAsset] = useState<Asset | null>(null);
     const [formKind, setFormKind] = useState<AssetKind>("text");
     const [imageDraft, setImageDraft] = useState<ImageDraft>(null);
@@ -136,11 +138,19 @@ export default function AssetsPage() {
 
     const readImageFile = async (file?: File) => {
         if (!file || !file.type.startsWith("image/")) return;
-        const image = await uploadImage(file);
-        const draft = { dataUrl: image.url, storageKey: image.storageKey, width: image.width, height: image.height, bytes: image.bytes, mimeType: image.mimeType };
-        setImageDraft(draft);
-        if (!form.getFieldValue("coverUrl")) form.setFieldValue("coverUrl", draft.dataUrl);
-        if (!form.getFieldValue("title")) form.setFieldValue("title", file.name);
+        const hideLoading = message.loading("正在上传图片素材...", 0);
+        try {
+            const image = await uploadImage(file);
+            const draft = { dataUrl: image.url, storageKey: image.storageKey, width: image.width, height: image.height, bytes: image.bytes, mimeType: image.mimeType };
+            setImageDraft(draft);
+            if (!form.getFieldValue("coverUrl")) form.setFieldValue("coverUrl", draft.dataUrl);
+            if (!form.getFieldValue("title")) form.setFieldValue("title", file.name);
+            message.success("图片素材上传成功");
+        } catch (error) {
+            message.error(error instanceof Error ? `图片上传失败：${error.message}` : "图片上传失败");
+        } finally {
+            hideLoading();
+        }
     };
 
     const copyAssetText = async (asset: Asset) => {
@@ -148,9 +158,26 @@ export default function AssetsPage() {
         copyText(asset.data.content, "文本已复制");
     };
 
-    const downloadImage = (asset: Asset) => {
+    const downloadImage = async (asset: Asset) => {
         if (asset.kind !== "image" && asset.kind !== "video") return;
-        saveAs(asset.kind === "video" ? asset.data.url : asset.data.dataUrl, `${asset.title || "asset"}.${asset.data.mimeType.split("/")[1] || "png"}`);
+        const url = asset.kind === "video" ? asset.data.url : asset.data.dataUrl;
+        const filename = `${asset.title || "asset"}.${asset.data.mimeType.split("/")[1] || (asset.kind === "video" ? "mp4" : "png")}`;
+
+        if (url.startsWith("data:") || url.startsWith("blob:")) {
+            saveAs(url, filename);
+        } else {
+            const hideLoading = message.loading("正在下载媒体文件...", 0);
+            try {
+                const response = await fetch(url.startsWith("http") ? `/api/proxy-image?url=${encodeURIComponent(url)}` : url);
+                const blob = await response.blob();
+                saveAs(blob, filename);
+            } catch (error) {
+                console.error("Download error, falling back to open:", error);
+                saveAs(url, filename);
+            } finally {
+                hideLoading();
+            }
+        }
     };
 
     const exportAllAssets = async () => {
@@ -265,7 +292,17 @@ export default function AssetsPage() {
                 <div className="mx-auto flex max-w-7xl flex-col gap-5">
                     <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
                         {visibleAssets.map((asset) => (
-                            <AssetCard key={asset.id} asset={asset} onOpen={() => setPreviewAsset(asset)} onEdit={() => openEdit(asset)} onCopy={copyAssetText} onDownload={downloadImage} onDelete={() => setDeletingAsset(asset)} />
+                            <AssetCard
+                                key={asset.id}
+                                asset={asset}
+                                onOpen={() => setPreviewAsset(asset)}
+                                onEdit={() => openEdit(asset)}
+                                onCopy={copyAssetText}
+                                onDownload={downloadImage}
+                                onDelete={() => setDeletingAsset(asset)}
+                                onPreviewImage={setPreviewImageUrl}
+                                onPlayVideo={setPreviewVideoUrl}
+                            />
                         ))}
                     </div>
 
@@ -358,8 +395,8 @@ export default function AssetsPage() {
                                 </Typography.Text>
                                 <div className="mt-2 flex flex-wrap gap-1.5">
                                     {tags.length ? (
-                                        tags.map((tag) => (
-                                            <Tag key={tag} className="m-0">
+                                        tags.map((tag, index) => (
+                                            <Tag key={`${tag}-${index}`} className="m-0">
                                                 {tag}
                                             </Tag>
                                         ))
@@ -400,29 +437,97 @@ export default function AssetsPage() {
             <Modal title="删除素材" open={Boolean(deletingAsset)} onCancel={() => setDeletingAsset(null)} onOk={confirmDelete} okText="删除" okButtonProps={{ danger: true }} cancelText="取消">
                 确定删除「{deletingAsset?.title}」吗？删除后会从我的素材中移除。
             </Modal>
+
+            {/* 隐藏的图片全屏预览器 */}
+            <div className="hidden">
+                <Image
+                    src={previewImageUrl || undefined}
+                    preview={{
+                        open: Boolean(previewImageUrl),
+                        onOpenChange: (open) => {
+                            if (!open) setPreviewImageUrl(null);
+                        },
+                    }}
+                />
+            </div>
+
+            {/* 视频 Modal 播放器 */}
+            <Modal
+                open={Boolean(previewVideoUrl)}
+                onCancel={() => setPreviewVideoUrl(null)}
+                footer={null}
+                destroyOnHidden
+                centered
+                width={800}
+                styles={{
+                    body: {
+                        padding: 0,
+                        backgroundColor: "#000",
+                        display: "flex",
+                        justifyContent: "center",
+                        alignItems: "center",
+                        minHeight: 300,
+                    },
+                }}
+            >
+                {previewVideoUrl && (
+                    <video src={previewVideoUrl} controls autoPlay className="max-h-[70vh] max-w-full rounded" />
+                )}
+            </Modal>
         </div>
     );
 }
 
-function AssetCard({ asset, onOpen, onEdit, onCopy, onDownload, onDelete }: { asset: Asset; onOpen: () => void; onEdit: () => void; onCopy: (asset: Asset) => void; onDownload: (asset: Asset) => void; onDelete: () => void }) {
+function AssetCard({
+    asset,
+    onOpen,
+    onEdit,
+    onCopy,
+    onDownload,
+    onDelete,
+    onPreviewImage,
+    onPlayVideo,
+}: {
+    asset: Asset;
+    onOpen: () => void;
+    onEdit: () => void;
+    onCopy: (asset: Asset) => void;
+    onDownload: (asset: Asset) => void;
+    onDelete: () => void;
+    onPreviewImage: (url: string) => void;
+    onPlayVideo: (url: string) => void;
+}) {
     const cover = asset.coverUrl || (asset.kind === "image" ? asset.data.dataUrl : "");
     const summary = assetSummary(asset);
+
+    const handleCardClick = () => {
+        if (asset.kind === "text") {
+            void onCopy(asset);
+        } else if (asset.kind === "image") {
+            onPreviewImage(asset.data.dataUrl || asset.coverUrl);
+        } else if (asset.kind === "video") {
+            onPlayVideo(asset.data.url);
+        }
+    };
+
     return (
         <Card
             hoverable
             className="overflow-hidden"
             styles={{ body: { padding: 0 } }}
             cover={
-                <button type="button" className="block w-full text-left" onClick={onOpen}>
+                <button type="button" className="block w-full text-left" onClick={handleCardClick}>
                     {cover ? (
                         <img src={cover} alt={asset.title} className="aspect-[4/3] w-full object-cover" />
                     ) : (
-                        <div className="flex aspect-[4/3] items-center justify-center bg-stone-100 p-5 text-center text-sm leading-6 text-stone-600 dark:bg-stone-900 dark:text-stone-300">{asset.kind === "text" ? asset.data.content : "暂无封面"}</div>
+                        <div className="flex aspect-[4/3] items-center justify-center bg-stone-100 p-5 text-center text-sm leading-6 text-stone-600 dark:bg-stone-900 dark:text-stone-300">
+                            {asset.kind === "text" ? asset.data.content : "暂无封面"}
+                        </div>
                     )}
                 </button>
             }
         >
-            <button type="button" className="block w-full text-left" onClick={onOpen}>
+            <button type="button" className="block w-full text-left" onClick={handleCardClick}>
                 <div className="p-4">
                     <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0">
@@ -437,8 +542,8 @@ function AssetCard({ asset, onOpen, onEdit, onCopy, onDownload, onDelete }: { as
                         {summary}
                     </Typography.Paragraph>
                     <div className="mt-3 flex flex-wrap gap-1.5">
-                        {(asset.tags || []).slice(0, 3).map((tag) => (
-                            <Tag key={tag} className="m-0 text-[11px]">
+                        {(asset.tags || []).slice(0, 3).map((tag, index) => (
+                            <Tag key={`${tag}-${index}`} className="m-0 text-[11px]">
                                 {tag}
                             </Tag>
                         ))}
@@ -490,8 +595,8 @@ function AssetDrawer({ asset, onClose, onCopy, onDownload }: { asset: Asset | nu
                         </Typography.Title>
                         <Space size={[4, 4]} wrap>
                             <Tag>{asset.kind === "image" ? "图片" : asset.kind === "video" ? "视频" : "文本"}</Tag>
-                            {(asset.tags || []).map((tag) => (
-                                <Tag key={tag}>{tag}</Tag>
+                            {(asset.tags || []).map((tag, index) => (
+                                <Tag key={`${tag}-${index}`}>{tag}</Tag>
                             ))}
                         </Space>
                     </div>

@@ -1,9 +1,11 @@
 .next/
 out/
 node_modules/
+.cache/
 .env*
 !.env.example
 data/
+data_副本/
 *.log
 *.tsbuildinfo
 .DS_Store

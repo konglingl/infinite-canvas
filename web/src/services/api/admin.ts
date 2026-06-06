@@ -36,6 +36,7 @@ export type AdminUserListResponse = {
 export type AdminCreditLog = {
     id: string;
     userId: string;
+    userDisplayName: string;
     type: string;
     amount: number;
     balance: number;
@@ -47,6 +48,29 @@ export type AdminCreditLog = {
 
 export type AdminCreditLogListResponse = {
     items: AdminCreditLog[];
+    total: number;
+};
+
+export type AdminAICallLog = {
+    id: string;
+    userId: string;
+    userDisplayName: string;
+    endpoint: string;
+    method: string;
+    model: string;
+    channelId: string;
+    channelName: string;
+    status: number;
+    durationMs: number;
+    credits: number;
+    requestBody: string;
+    responseBody: string;
+    error: string;
+    createdAt: string;
+};
+
+export type AdminAICallLogListResponse = {
+    items: AdminAICallLog[];
     total: number;
 };
 
@@ -82,6 +106,14 @@ export async function saveAdminCreditLog(token: string, log: Partial<AdminCredit
 
 export async function deleteAdminCreditLog(token: string, id: string) {
     return apiDelete<boolean>(`/api/admin/credit-logs/${encodeURIComponent(id)}`, token);
+}
+
+export async function fetchAdminAICallLogs(token: string, query: AdminUserQuery = {}) {
+    return apiGet<AdminAICallLogListResponse>("/api/admin/ai-logs", compactApiParams(query), token);
+}
+
+export async function deleteAdminAICallLogs(token: string, olderThanDays = 7) {
+    return apiDelete<{ removedFiles: number }>(`/api/admin/ai-logs?olderThanDays=${encodeURIComponent(String(olderThanDays))}`, token);
 }
 
 export async function fetchAdminPromptCategories(token: string) {
@@ -157,12 +189,14 @@ export async function deleteAdminAsset(token: string, id: string) {
 }
 
 export type AdminModelChannel = {
+    id: string;
     protocol: "openai";
     name: string;
     baseUrl: string;
     apiKey: string;
     models: string[];
     weight: number;
+    timeout: number;
     enabled: boolean;
     remark: string;
 };
@@ -170,12 +204,31 @@ export type AdminModelChannel = {
 export type AdminPublicModelChannelSettings = {
     availableModels: string[];
     modelCosts: AdminModelCost[];
+    channels: AdminPublicModelChannelInfo[];
     defaultModel: string;
     defaultImageModel: string;
     defaultVideoModel: string;
     defaultTextModel: string;
     systemPrompt: string;
+    systemPrompts: {
+        image: string;
+        video: string;
+        text: string;
+        workflow: string;
+        workflowAgent: string;
+    };
     allowCustomChannel: boolean;
+};
+
+export type AdminPublicModelChannelInfo = {
+    id: string;
+    name: string;
+    baseUrl: string;
+    models: string[];
+    weight: number;
+    timeout: number;
+    enabled: boolean;
+    remark: string;
 };
 
 export type AdminModelCost = {
@@ -191,6 +244,29 @@ export type AdminPublicSettings = {
             enabled: boolean;
         };
     };
+    storage: {
+        mode: string;
+        allowUserProvider: boolean;
+    };
+};
+
+export type AdminStorageProvider = {
+    id: string;
+    name: string;
+    type: "s3";
+    endpoint: string;
+    region: string;
+    bucket: string;
+    accessKeyId: string;
+    secretAccessKey: string;
+    publicBaseUrl: string;
+    pathPrefix: string;
+    weight: number;
+    enabled: boolean;
+    ownerUserId: string;
+    capacityBytes: number;
+    capacityCheckedAt: string;
+    capacityExceeded: boolean;
 };
 
 export type AdminPrivateSettings = {
@@ -199,11 +275,30 @@ export type AdminPrivateSettings = {
         enabled: boolean;
         cron: string;
     };
+    aiLog: {
+        localDirectReportEnabled: boolean;
+        cleanup: {
+            enabled: boolean;
+            retentionDays: number;
+            cron: string;
+        };
+    };
     auth: {
         linuxDo: {
             clientId: string;
             clientSecret: string;
         };
+    };
+    storage: {
+        mode: string;
+        allowUserProvider: boolean;
+        providers: AdminStorageProvider[];
+        roundRobinCursor: number;
+        capacityCheck: {
+            enabled: boolean;
+            cron: string;
+        };
+        capacityLimitBytes: number;
     };
 };
 
@@ -232,4 +327,16 @@ export async function fetchChannelModels(token: string, payload: AdminChannelAct
 
 export async function testChannelModel(token: string, payload: AdminChannelActionRequest) {
     return apiPost<string>("/api/admin/settings/channel-test", payload, token);
+}
+
+export type StorageCapacityResult = {
+    bytes: number;
+    limitBytes: number;
+    overLimit: boolean;
+    checkedAt: string;
+    providerName: string;
+};
+
+export async function measureAdminStorageProvider(token: string, payload: { index: number; provider: AdminStorageProvider }) {
+    return apiPost<StorageCapacityResult>("/api/admin/storage/measure", payload, token);
 }

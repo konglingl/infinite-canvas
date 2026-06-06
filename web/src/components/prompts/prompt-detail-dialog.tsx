@@ -18,8 +18,8 @@ export function PromptDetailDialog({ prompt, onClose, onCopy, onSaveAsset }: { p
                             </div>
                             <div className="min-w-0">
                                 <div className="flex flex-wrap gap-1.5">
-                                    {prompt.tags.map((tag) => (
-                                        <Tag key={tag} className="m-0">
+                                    {prompt.tags.map((tag, index) => (
+                                        <Tag key={`${tag}-${index}`} className="m-0">
                                             {tag}
                                         </Tag>
                                     ))}
