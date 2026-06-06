@@ -79,6 +79,27 @@ func normalizePublicSettingWithChannels(setting model.PublicSetting, channels []
 	if setting.ModelChannel.ModelCosts == nil {
 		setting.ModelChannel.ModelCosts = []model.ModelCost{}
 	}
+	if setting.ModelChannel.Channels == nil {
+		setting.ModelChannel.Channels = []model.PublicModelChannelInfo{}
+	}
+	if strings.TrimSpace(setting.ModelChannel.SystemPrompts.Image) == "" {
+		setting.ModelChannel.SystemPrompts.Image = firstNonEmpty(setting.ModelChannel.SystemPrompt, DefaultSystemPrompts().Image)
+	}
+	if strings.TrimSpace(setting.ModelChannel.SystemPrompts.Video) == "" {
+		setting.ModelChannel.SystemPrompts.Video = DefaultSystemPrompts().Video
+	}
+	if strings.TrimSpace(setting.ModelChannel.SystemPrompts.Text) == "" {
+		setting.ModelChannel.SystemPrompts.Text = firstNonEmpty(setting.ModelChannel.SystemPrompt, DefaultSystemPrompts().Text)
+	}
+	if strings.TrimSpace(setting.ModelChannel.SystemPrompts.Workflow) == "" {
+		setting.ModelChannel.SystemPrompts.Workflow = DefaultSystemPrompts().Workflow
+	}
+	if strings.TrimSpace(setting.ModelChannel.SystemPrompts.WorkflowAgent) == "" {
+		setting.ModelChannel.SystemPrompts.WorkflowAgent = DefaultSystemPrompts().WorkflowAgent
+	}
+	if setting.Storage.Mode == "" {
+		setting.Storage.Mode = "local_indexeddb"
+	}
 	for i := range setting.ModelChannel.ModelCosts {
 		setting.ModelChannel.ModelCosts[i].Model = strings.TrimSpace(setting.ModelChannel.ModelCosts[i].Model)
 		if setting.ModelChannel.ModelCosts[i].Credits < 0 {
@@ -125,6 +146,8 @@ func normalizePrivateSetting(setting model.PrivateSetting) model.PrivateSetting 
 		setting.Channels = []model.ModelChannel{}
 	}
 	setting.PromptSync = normalizePromptSyncSetting(setting.PromptSync)
+	setting.AILog = normalizeAILogSetting(setting.AILog)
+	setting.Storage = normalizePrivateStorageSetting(setting.Storage)
 	for i := range setting.Channels {
 		if setting.Channels[i].Protocol == "" {
 			setting.Channels[i].Protocol = "openai"
