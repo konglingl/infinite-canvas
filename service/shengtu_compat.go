@@ -106,3 +106,19 @@ func SelectModelChannelForModel(modelName string, channelID string) (model.Model
 	}
 	return SelectModelChannel(modelName)
 }
+
+
+func findSavedStorageProvider(provider model.StorageProvider, saved []model.StorageProvider, index int) (model.StorageProvider, bool) {
+	for _, item := range saved {
+		if provider.ID != "" && item.ID == provider.ID {
+			return item, true
+		}
+		if item.Name == provider.Name && item.Endpoint == provider.Endpoint && item.Bucket == provider.Bucket {
+			return item, true
+		}
+	}
+	if index >= 0 && index < len(saved) {
+		return saved[index], true
+	}
+	return model.StorageProvider{}, false
+}
