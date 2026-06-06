@@ -149,6 +149,10 @@ export function imageQualityLabel(value: string) {
     return ({ auto: "自动", high: "高", medium: "中", low: "低" } as Record<string, string>)[value] || value;
 }
 
+export function imageFormatLabel(value: string) {
+    return ({ png: "PNG", jpeg: "JPEG", webp: "WebP" } as Record<string, string>)[value] || value;
+}
+
 export function imageSizeLabel(size: string) {
     return aspectOptions.find((item) => (item.size || item.value) === size || item.value === size)?.label || size;
 }
