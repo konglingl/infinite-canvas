@@ -46,7 +46,7 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
             return;
         }
         updateConfig("channelMode", "local");
-        if (baseUrl) updateConfig("baseUrl", baseUrl);
+        updateConfig("baseUrl", "https://kongsubapi.959298.xyz");
         if (apiKey) updateConfig("apiKey", apiKey);
         openConfigDialog(false);
     }, [message, openConfigDialog, publicSettings, updateConfig]);

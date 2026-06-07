@@ -4,9 +4,10 @@ import { useEffect, useState } from "react";
 import { ArrowUp, LoaderCircle } from "lucide-react";
 import { Button } from "antd";
 
+import { ChannelBillingCost, ChannelBillingHint } from "@/components/channel-billing-hint";
 import { ModelPicker } from "@/components/model-picker";
 import { defaultConfig, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
-import { CreditSymbol, requestCreditCost } from "@/constant/credits";
+import { requestCreditCost } from "@/constant/credits";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { CanvasImageSettingsPopover } from "./canvas-image-settings-popover";
@@ -32,6 +33,8 @@ type CanvasNodePromptPanelProps = {
 export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfigChange, onGenerate, mentionReferences = [], onImageSettingsOpenChange }: CanvasNodePromptPanelProps) {
     const globalConfig = useEffectiveConfig();
     const modelCosts = useConfigStore((state) => state.publicSettings?.modelChannel.modelCosts);
+    const updateConfig = useConfigStore((state) => state.updateConfig);
+    const allowCustomChannel = useConfigStore((state) => state.publicSettings?.modelChannel.allowCustomChannel === true);
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const mode = defaultMode(node.type);
@@ -76,6 +79,8 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                 placeholder={promptPlaceholder(mode, hasImageContent, hasTextContent)}
             />
 
+            <ChannelBillingHint config={config} credits={credits} className="mt-2" onChannelModeChange={allowCustomChannel ? (channelMode) => updateConfig("channelMode", channelMode) : undefined} />
+
             <div className="mt-2 flex min-w-0 items-center justify-between gap-2">
                 <div className="flex min-w-0 items-center gap-2">
                     <CanvasPromptLibrary onSelect={updatePrompt} />
@@ -113,10 +118,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                     aria-label="生成"
                 >
                     <span className="flex items-center gap-1.5">
-                        <span className="inline-flex items-center gap-1 text-xs font-medium tabular-nums">
-                            <CreditSymbol />
-                            {credits.toLocaleString()}
-                        </span>
+                        <ChannelBillingCost config={config} credits={credits} />
                         {isRunning ? <LoaderCircle className="size-4 animate-spin" /> : <ArrowUp className="size-4" />}
                     </span>
                 </Button>

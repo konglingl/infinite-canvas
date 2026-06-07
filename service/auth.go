@@ -101,24 +101,136 @@ func Register(username string, password string) (model.AuthSession, error) {
 }
 
 func Login(username string, password string) (model.AuthSession, error) {
-	user, ok, err := repository.GetUserByUsername(strings.TrimSpace(username))
-	if err != nil {
+	login := strings.TrimSpace(username)
+	if login == "" || password == "" {
+		return model.AuthSession{}, safeMessageError{message: "用户名和密码不能为空"}
+	}
+
+	if user, ok, err := repository.GetUserByUsername(login); err != nil {
 		return model.AuthSession{}, err
+	} else if ok && bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(password)) == nil {
+		return loginExistingUser(user)
 	}
-	if !ok || bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(password)) != nil {
-		return model.AuthSession{}, safeMessageError{message: "用户名或密码错误"}
+
+	if session, ok, err := loginWithSub2API(login, password); err != nil {
+		var safe safeMessageError
+		if errors.As(err, &safe) {
+			return model.AuthSession{}, err
+		}
+		log.Printf("sub2api auth fallback failed: %v", err)
+	} else if ok {
+		return session, nil
 	}
+
+	return model.AuthSession{}, safeMessageError{message: "用户名或密码错误"}
+}
+
+func loginExistingUser(user model.User) (model.AuthSession, error) {
 	if user.Status == model.UserStatusBan {
 		return model.AuthSession{}, safeMessageError{message: "账号已被禁用"}
 	}
 	normalizeUserDefaults(&user)
 	user.LastLoginAt = now()
 	user.UpdatedAt = now()
+	var err error
 	user, err = repository.SaveUser(user)
 	if err != nil {
 		return model.AuthSession{}, err
 	}
 	return newSession(user)
+}
+
+func loginWithSub2API(login string, password string) (model.AuthSession, bool, error) {
+	if !config.Cfg.Sub2APIAuthEnabled || strings.TrimSpace(config.Cfg.Sub2APIAuthDSN) == "" {
+		return model.AuthSession{}, false, nil
+	}
+	remote, ok, err := repository.GetSub2APIAuthUser(login)
+	if err != nil || !ok {
+		return model.AuthSession{}, false, err
+	}
+	if strings.TrimSpace(remote.PasswordHash) == "" || bcrypt.CompareHashAndPassword([]byte(remote.PasswordHash), []byte(password)) != nil {
+		return model.AuthSession{}, false, nil
+	}
+	if !strings.EqualFold(strings.TrimSpace(remote.Status), "active") {
+		return model.AuthSession{}, true, safeMessageError{message: "账号已被禁用"}
+	}
+	user, err := upsertSub2APILocalUser(remote)
+	if err != nil {
+		return model.AuthSession{}, true, err
+	}
+	session, err := newSession(user)
+	return session, true, err
+}
+
+func upsertSub2APILocalUser(remote repository.Sub2APIAuthUser) (model.User, error) {
+	mirrorID := fmt.Sprintf("sub2api-%d", remote.ID)
+	user, ok, err := repository.GetUserByID(mirrorID)
+	if err != nil {
+		return model.User{}, err
+	}
+
+	nowText := now()
+	if ok && user.Status == model.UserStatusBan {
+		return model.User{}, safeMessageError{message: "账号已被禁用"}
+	}
+
+	extra, _ := json.Marshal(map[string]any{
+		"source": "sub2api",
+		"sub2api": map[string]any{
+			"id":       remote.ID,
+			"email":    remote.Email,
+			"username": remote.Username,
+			"role":     remote.Role,
+			"status":   remote.Status,
+		},
+	})
+
+	if !ok {
+		user = model.User{
+			ID:        mirrorID,
+			Username:  sub2APIMirrorUsername(remote.ID, mirrorID),
+			Password:  "",
+			Role:      sub2APIDefaultRole(remote),
+			Credits:   config.Cfg.Sub2APIAuthDefaultCredits,
+			AffCode:   newAffCode(),
+			Status:    model.UserStatusActive,
+			CreatedAt: nowText,
+		}
+	} else if user.Role == "" || user.Role == model.UserRoleGuest {
+		user.Role = model.UserRoleUser
+	}
+	if config.Cfg.Sub2APIAuthAdminAsAdmin && strings.EqualFold(strings.TrimSpace(remote.Role), "admin") {
+		user.Role = model.UserRoleAdmin
+	}
+
+	user.Email = strings.TrimSpace(remote.Email)
+	user.DisplayName = firstNonEmpty(strings.TrimSpace(remote.Username), strings.TrimSpace(remote.Email), user.DisplayName)
+	user.Extra = string(extra)
+	user.LastLoginAt = nowText
+	user.UpdatedAt = nowText
+	normalizeUserDefaults(&user)
+	return repository.SaveUser(user)
+}
+
+func sub2APIDefaultRole(remote repository.Sub2APIAuthUser) model.UserRole {
+	if config.Cfg.Sub2APIAuthAdminAsAdmin && strings.EqualFold(strings.TrimSpace(remote.Role), "admin") {
+		return model.UserRoleAdmin
+	}
+	return model.UserRoleUser
+}
+
+func sub2APIMirrorUsername(remoteID int64, mirrorID string) string {
+	candidates := []string{
+		fmt.Sprintf("sub2api-%d", remoteID),
+		fmt.Sprintf("sub2api-user-%d", remoteID),
+	}
+	for _, candidate := range candidates {
+		user, ok, err := repository.GetUserByUsername(candidate)
+		if err == nil && (!ok || user.ID == mirrorID) {
+			return candidate
+		}
+	}
+	return mirrorID + "-" + strings.ReplaceAll(uuid.NewString()[:8], "-", "")
 }
 
 func LinuxDoAuthorizeURL(r *http.Request, redirect string) (string, error) {

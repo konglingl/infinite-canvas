@@ -4,16 +4,21 @@ import { useMemo } from "react";
 import { useInfiniteQuery } from "@tanstack/react-query";
 
 import { ALL_PROMPTS_OPTION, fetchPrompts } from "@/services/api/prompts";
+import { useUserStore } from "@/stores/use-user-store";
 
 export const PROMPT_PAGE_SIZE = 20;
 
 export function usePromptList({ keyword, tags, category, enabled = true }: { keyword: string; tags: string[]; category: string; enabled?: boolean }) {
+    const token = useUserStore((state) => state.token);
+    const isUserReady = useUserStore((state) => state.isReady);
+    const canFetch = enabled && isUserReady && Boolean(token);
+
     const query = useInfiniteQuery({
-        queryKey: ["prompts", keyword, tags, category],
-        queryFn: ({ pageParam }) => fetchPrompts({ keyword, tag: tags, category, page: pageParam, pageSize: PROMPT_PAGE_SIZE }),
+        queryKey: ["prompts", keyword, tags, category, token ? "auth" : "guest"],
+        queryFn: ({ pageParam }) => fetchPrompts({ keyword, tag: tags, category, page: pageParam, pageSize: PROMPT_PAGE_SIZE }, token),
         initialPageParam: 1,
         getNextPageParam: (lastPage, pages) => (pages.reduce((total, page) => total + page.items.length, 0) < lastPage.total ? pages.length + 1 : undefined),
-        enabled,
+        enabled: canFetch,
     });
     const firstPage = query.data?.pages[0];
     return {

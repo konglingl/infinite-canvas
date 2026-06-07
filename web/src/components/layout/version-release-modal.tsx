@@ -47,16 +47,17 @@ export function VersionReleaseModal({ className, style }: VersionReleaseModalPro
                     </div>
                     <div className="rounded-lg border border-stone-200 p-3 dark:border-stone-800">
                         <div className="flex items-center justify-between gap-3">
-                            <div className="text-xs text-stone-500 dark:text-stone-400">最新版本</div>
+                            <div className="text-xs text-stone-500 dark:text-stone-400">项目版本</div>
                             <button
                                 type="button"
                                 className="cursor-pointer bg-transparent p-0 text-[11px] font-normal text-stone-400 underline-offset-2 transition hover:text-stone-700 hover:underline dark:text-stone-500 dark:hover:text-stone-300"
                                 onClick={() => void checkLatestRelease(true)}
                             >
-                                {checking ? "检查中..." : "检查更新"}
+                                {checking ? "读取中..." : "版本说明"}
                             </button>
                         </div>
                         <div className="mt-1 text-base font-semibold text-stone-950 dark:text-stone-100">{latestVersion}</div>
+                        <div className="mt-1 text-xs leading-5 text-stone-500 dark:text-stone-400">本项目采用日期版本体系，不再跟随原开源仓库语义版本号。</div>
                     </div>
                 </div>
                 <div className="max-h-[56vh] overflow-y-auto pr-2">

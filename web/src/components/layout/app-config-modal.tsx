@@ -3,10 +3,11 @@
 import { App, Button, Form, Input, Modal, Segmented, Select } from "antd";
 import { useState } from "react";
 
+import { ChannelBillingHint } from "@/components/channel-billing-hint";
 import { ModelPicker } from "@/components/model-picker";
 import { fetchImageModels } from "@/services/api/image";
 import { audioFormatOptions, audioVoiceOptions, normalizeAudioSpeedValue } from "@/lib/audio-generation";
-import { filterModelsByCapability, useConfigStore, useEffectiveConfig, type AiConfig, type ModelCapability } from "@/stores/use-config-store";
+import { FIXED_USER_API_BASE_URL, filterModelsByCapability, useConfigStore, useEffectiveConfig, type AiConfig, type ModelCapability } from "@/stores/use-config-store";
 
 type ModelGroup = {
     capability: ModelCapability;
@@ -42,7 +43,7 @@ export function AppConfigModal() {
 
     const finishConfig = () => {
         setConfigDialogOpen(false);
-        if (effectiveMode === "local" && (!config.baseUrl.trim() || !config.apiKey.trim())) return;
+        if (effectiveMode === "local" && !config.apiKey.trim()) return;
         if (!modelConfig.imageModel.trim() || !modelConfig.videoModel.trim() || !modelConfig.textModel.trim()) return;
         if (!allowCustomChannel && config.channelMode !== "remote") updateConfig("channelMode", "remote");
         message.success(shouldPromptContinue ? "配置已保存，请继续刚才的请求" : "配置已保存");
@@ -51,8 +52,8 @@ export function AppConfigModal() {
 
     const refreshModels = async () => {
         if (effectiveMode === "remote") return;
-        if (!config.baseUrl.trim() || !config.apiKey.trim()) {
-            message.error("请先填写 Base URL 和 API Key");
+        if (!config.apiKey.trim()) {
+            message.error("Please enter API Key");
             return;
         }
         setLoadingModels(true);
@@ -118,19 +119,22 @@ export function AppConfigModal() {
                                 value={effectiveMode}
                                 onChange={(value) => updateConfig("channelMode", value as AiConfig["channelMode"])}
                                 options={[
-                                    { label: "本地直连", value: "local" },
+                                    { label: "自带 Key", value: "local" },
                                     { label: "云端渠道", value: "remote" },
                                 ]}
                             />
                         </Form.Item>
                     ) : null}
+                    {allowCustomChannel ? <ChannelBillingHint config={{ channelMode: effectiveMode }} className="mb-5" /> : null}
                     {effectiveMode === "local" ? (
                         <>
                             <div className="grid gap-4 md:grid-cols-2">
-                                <Form.Item label="Base URL" className="mb-4">
-                                    <Input value={config.baseUrl} onChange={(event) => updateConfig("baseUrl", event.target.value)} />
+                                <Form.Item label="固定中转站" className="mb-4">
+                                    <div className="rounded-md border border-stone-200 bg-stone-50 px-3 py-2 text-sm text-stone-700 dark:border-stone-800 dark:bg-stone-900 dark:text-stone-200">
+                                        {FIXED_USER_API_BASE_URL}
+                                    </div>
                                 </Form.Item>
-                                <Form.Item label="API Key" className="mb-4">
+                                <Form.Item label="API Key" className="mb-4" extra="仅用于通过本站后端转发到固定中转站，不允许自定义 URL。">
                                     <Input.Password value={config.apiKey} onChange={(event) => updateConfig("apiKey", event.target.value)} />
                                 </Form.Item>
                             </div>
@@ -153,8 +157,8 @@ export function AppConfigModal() {
                     {effectiveMode === "local" ? (
                         <section className="mb-5 rounded-lg border border-stone-200 p-3 dark:border-stone-800">
                             <div className="mb-3">
-                                <div className="text-sm font-semibold">本地模型可选项</div>
-                                <div className="mt-1 text-xs text-stone-500">从已拉取模型中选择哪些模型可进入各类下拉。</div>
+                                <div className="text-sm font-semibold">自带 Key 模型可选项</div>
+                                <div className="mt-1 text-xs text-stone-500">从固定中转站已拉取模型中选择哪些模型可进入各类下拉。</div>
                             </div>
                             <div className="grid gap-4 md:grid-cols-2">
                                 {modelGroups.map((group) => (

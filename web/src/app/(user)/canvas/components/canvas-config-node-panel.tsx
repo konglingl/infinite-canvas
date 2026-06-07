@@ -4,9 +4,10 @@ import type { CSSProperties } from "react";
 import { Image as ImageIcon, LoaderCircle, MessageSquare, Music2, Play, Settings2, Video } from "lucide-react";
 import { Button, Segmented } from "antd";
 
+import { ChannelBillingCost, ChannelBillingHint } from "@/components/channel-billing-hint";
 import { ModelPicker } from "@/components/model-picker";
 import { defaultConfig, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
-import { CreditSymbol, requestCreditCost } from "@/constant/credits";
+import { requestCreditCost } from "@/constant/credits";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { CanvasImageSettingsPopover } from "./canvas-image-settings-popover";
@@ -26,6 +27,8 @@ type CanvasConfigNodePanelProps = {
 export function CanvasConfigNodePanel({ node, isRunning, inputSummary, onConfigChange, onGenerate, onComposerToggle }: CanvasConfigNodePanelProps) {
     const globalConfig = useEffectiveConfig();
     const modelCosts = useConfigStore((state) => state.publicSettings?.modelChannel.modelCosts);
+    const updateConfig = useConfigStore((state) => state.updateConfig);
+    const allowCustomChannel = useConfigStore((state) => state.publicSettings?.modelChannel.allowCustomChannel === true);
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const mode = node.metadata?.generationMode || "image";
@@ -111,6 +114,10 @@ export function CanvasConfigNodePanel({ node, isRunning, inputSummary, onConfigC
                 ) : null}
             </div>
 
+            <div className="mb-2 cursor-default" onMouseDown={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}>
+                <ChannelBillingHint config={config} credits={credits} className="!px-2 !py-1" onChannelModeChange={allowCustomChannel ? (channelMode) => updateConfig("channelMode", channelMode) : undefined} />
+            </div>
+
             <Button
                 type="primary"
                 className="mt-auto !h-9 !w-full !cursor-pointer !rounded-lg"
@@ -119,10 +126,7 @@ export function CanvasConfigNodePanel({ node, isRunning, inputSummary, onConfigC
                 onClick={() => onGenerate(node.id)}
             >
                 <span className="inline-flex items-center gap-1.5">
-                    <span className="inline-flex items-center gap-1">
-                        <CreditSymbol />
-                        {credits.toLocaleString()}
-                    </span>
+                    <ChannelBillingCost config={config} credits={credits} />
                     {isRunning ? <LoaderCircle className="size-4 animate-spin" /> : <Play className="size-4" />}
                     <span>开始生成</span>
                 </span>

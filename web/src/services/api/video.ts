@@ -4,7 +4,7 @@ import { dataUrlToFile } from "@/lib/image-utils";
 import { getMediaBlob, uploadMediaFile, type UploadedFile } from "@/services/file-storage";
 import { imageToDataUrl } from "@/services/image-storage";
 import { boolConfig, buildSeedancePromptText, isSeedanceVideoConfig, normalizeSeedanceDuration, normalizeSeedanceRatio, normalizeSeedanceResolution, seedanceVideoReferenceError, SEEDANCE_REFERENCE_LIMITS } from "@/lib/seedance-video";
-import { buildApiUrl, type AiConfig } from "@/stores/use-config-store";
+import { type AiConfig } from "@/stores/use-config-store";
 import { useUserStore } from "@/stores/use-user-store";
 import type { ReferenceImage } from "@/types/image";
 import type { ReferenceAudio, ReferenceVideo } from "@/types/media";
@@ -22,21 +22,17 @@ type ReferenceMediaUploadResponse = { id: string; url: string; mimeType: string;
 
 export type VideoGenerationResult = { blob?: Blob; url?: string; mimeType?: string };
 
-function aiApiUrl(config: AiConfig, path: string) {
-    return config.channelMode === "remote" ? `/api/v1${path}` : buildApiUrl(config.baseUrl, path);
+function aiApiUrl(_config: AiConfig, path: string) {
+    return `/api/v1${path}`;
 }
 
 function aiHeaders(config: AiConfig, contentType?: string) {
     const token = useUserStore.getState().token;
-    return config.channelMode === "remote"
-        ? {
-              ...(token ? { Authorization: `Bearer ${token}` } : {}),
-              ...(contentType ? { "Content-Type": contentType } : {}),
-          }
-        : {
-              Authorization: `Bearer ${config.apiKey}`,
-              ...(contentType ? { "Content-Type": contentType } : {}),
-          };
+    return {
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...(config.channelMode === "local" ? { "X-Shengtu-User-Api-Key": config.apiKey.trim() } : {}),
+        ...(contentType ? { "Content-Type": contentType } : {}),
+    };
 }
 
 function refreshRemoteUser(config: AiConfig) {
@@ -75,13 +71,13 @@ async function requestOpenAIVideoGeneration(config: AiConfig, model: string, pro
         const created = unwrapVideoResponse((await axios.post<ApiVideoResponse>(aiApiUrl(config, "/videos"), body, { headers: aiHeaders(config) })).data);
         if (!created.id) throw new Error("视频接口没有返回任务 ID");
         for (let attempt = 0; attempt < 120; attempt += 1) {
-            const video = unwrapVideoResponse((await axios.get<ApiVideoResponse>(aiApiUrl(config, `/videos/${created.id}`), { headers: aiHeaders(config), params: config.channelMode === "remote" ? { model } : undefined })).data);
+            const video = unwrapVideoResponse((await axios.get<ApiVideoResponse>(aiApiUrl(config, `/videos/${created.id}`), { headers: aiHeaders(config), params: { model } })).data);
             if (video.status === "completed") break;
             if (video.status === "failed" || video.status === "cancelled") throw new Error(video.error?.message || "视频生成失败");
             if (attempt === 119) throw new Error("视频生成超时，请稍后重试");
             await delay(2500);
         }
-        const content = await axios.get<Blob>(aiApiUrl(config, `/videos/${created.id}/content`), { headers: aiHeaders(config), params: config.channelMode === "remote" ? { model } : undefined, responseType: "blob" });
+        const content = await axios.get<Blob>(aiApiUrl(config, `/videos/${created.id}/content`), { headers: aiHeaders(config), params: { model }, responseType: "blob" });
         await assertVideoBlob(content.data);
         refreshRemoteUser(config);
         return { blob: content.data };
@@ -112,7 +108,7 @@ async function requestSeedanceGeneration(config: AiConfig, model: string, prompt
         const created = unwrapSeedanceTask((await axios.post<ApiEnvelope<SeedanceTask>>(seedanceApiUrl(config), payload, { headers: aiHeaders(config, "application/json") })).data);
         if (!created.id) throw new Error("Seedance 接口没有返回任务 ID");
         for (let attempt = 0; attempt < 120; attempt += 1) {
-            const task = unwrapSeedanceTask((await axios.get<ApiEnvelope<SeedanceTask>>(seedanceApiUrl(config, created.id), { headers: aiHeaders(config), params: config.channelMode === "remote" ? { model } : undefined })).data);
+            const task = unwrapSeedanceTask((await axios.get<ApiEnvelope<SeedanceTask>>(seedanceApiUrl(config, created.id), { headers: aiHeaders(config), params: { model } })).data);
             if (task.status === "succeeded") {
                 const url = task.content?.video_url;
                 if (!url) throw new Error("Seedance 任务成功但没有返回视频 URL");
@@ -151,9 +147,8 @@ function assertSeedanceAudioReferences(audioReferences: ReferenceAudio[]) {
     if (total > 15000) throw new Error("Seedance 参考音频总时长不能超过 15 秒");
 }
 
-function seedanceApiUrl(config: AiConfig, taskId?: string) {
-    if (config.channelMode === "remote") return taskId ? `/api/v1/videos/${encodeURIComponent(taskId)}` : "/api/v1/videos";
-    return buildApiUrl(config.baseUrl, `/contents/generations/tasks${taskId ? `/${encodeURIComponent(taskId)}` : ""}`);
+function seedanceApiUrl(_config: AiConfig, taskId?: string) {
+    return taskId ? `/api/v1/videos/${encodeURIComponent(taskId)}` : "/api/v1/videos";
 }
 
 async function buildSeedanceContent(config: AiConfig, prompt: string, references: ReferenceImage[], videoReferences: ReferenceVideo[], audioReferences: ReferenceAudio[]) {
@@ -226,7 +221,6 @@ async function videoResultFromUrl(url: string): Promise<VideoGenerationResult> {
 
 function assertVideoConfig(config: AiConfig, model: string) {
     if (!model) throw new Error("请先配置视频模型");
-    if (config.channelMode === "local" && !config.baseUrl.trim()) throw new Error("请先配置 Base URL");
     if (config.channelMode === "local" && !config.apiKey.trim()) throw new Error("请先配置 API Key");
 }
 

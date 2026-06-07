@@ -6,7 +6,9 @@ import { App, Button, Image, Tag } from "antd";
 
 import { fetchPrompts, type Prompt } from "@/services/api/prompts";
 import { navigationTools } from "@/constant/navigation-tools";
+import { LocalStorageNotice } from "@/components/local-storage-notice";
 import { cn } from "@/lib/utils";
+import { useUserStore } from "@/stores/use-user-store";
 
 function Highlighter({ action, color, children }: { action: "highlight" | "underline"; color: string; children: ReactNode }) {
     return (
@@ -27,12 +29,15 @@ export default function IndexPage() {
     const [promptShowcase, setPromptShowcase] = useState<Prompt[]>([]);
     const [previewIndex, setPreviewIndex] = useState(0);
     const [previewOpen, setPreviewOpen] = useState(false);
+    const token = useUserStore((state) => state.token);
+    const isUserReady = useUserStore((state) => state.isReady);
 
     useEffect(() => {
-        void fetchPrompts({ pageSize: 12 })
+        if (!isUserReady || !token) return;
+        void fetchPrompts({ pageSize: 12 }, token)
             .then((data) => setPromptShowcase(data.items))
-            .catch((error) => message.error(error instanceof Error ? error.message : "获取提示词失败"));
-    }, [message]);
+            .catch((error) => message.error(error instanceof Error ? error.message : "???????"));
+    }, [isUserReady, message, token]);
 
     return (
         <main className="relative h-full overflow-y-auto bg-background bg-[radial-gradient(#e5e7eb_1px,transparent_1px)] [background-size:16px_16px] text-stone-950 dark:bg-[radial-gradient(rgba(245,245,244,.18)_1px,transparent_1px)] dark:text-stone-100">
@@ -61,6 +66,7 @@ export default function IndexPage() {
                             打开画布
                         </Button>
                     </div>
+                    <LocalStorageNotice scope="home" compact className="mt-6 w-full max-w-3xl" />
                 </div>
 
                 <section className="relative mx-auto mb-20 max-w-6xl border-t border-stone-200 pt-12 dark:border-stone-800">

@@ -6,6 +6,7 @@ import { App, Button } from "antd";
 import { Download, FileUp, Plus } from "lucide-react";
 
 import { readZip } from "@/lib/zip";
+import { LocalStorageNotice } from "@/components/local-storage-notice";
 import { setMediaBlob } from "@/services/file-storage";
 import { setImageBlob } from "@/services/image-storage";
 import { CanvasDeleteProjectsDialog } from "./components/canvas-delete-projects-dialog";
@@ -88,6 +89,8 @@ export default function CanvasPage() {
                         </Button>
                     </div>
                 </header>
+
+                <LocalStorageNotice scope="canvas" />
 
                 {!hydrated ? (
                     <section className="flex min-h-[360px] items-center justify-center border-y border-stone-200 text-sm text-stone-500 dark:border-stone-800">正在加载画布...</section>

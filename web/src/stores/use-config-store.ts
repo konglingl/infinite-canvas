@@ -71,11 +71,12 @@ export type AiConfig = {
 };
 
 export const CONFIG_STORE_KEY = "infinite-canvas:ai_config_store";
+export const FIXED_USER_API_BASE_URL = "https://kongsubapi.959298.xyz";
 export type ModelCapability = "image" | "video" | "text" | "audio";
 
 export const defaultConfig: AiConfig = {
     channelMode: "local",
-    baseUrl: "https://api.openai.com",
+    baseUrl: FIXED_USER_API_BASE_URL,
     apiKey: "",
     localChannels: [],
     imageChannelId: "",
@@ -186,12 +187,12 @@ export function normalizeLocalChannels(config: Partial<AiConfig>) {
     const normalized = channels.map((channel, index) => ({
         id: channel.id || `local-${index + 1}`,
         name: typeof channel.name === "string" ? channel.name : `???? ${index + 1}`,
-        baseUrl: channel.baseUrl || "",
+        baseUrl: FIXED_USER_API_BASE_URL,
         apiKey: channel.apiKey || "",
         models: Array.isArray(channel.models) ? channel.models.filter(Boolean) : [],
     }));
     if (!normalized.length) {
-        normalized.push({ id: "local-default", name: "????", baseUrl: config.baseUrl || defaultConfig.baseUrl, apiKey: config.apiKey || "", models: Array.isArray(config.models) ? config.models.filter(Boolean) : [] });
+        normalized.push({ id: "local-default", name: "User API Key", baseUrl: FIXED_USER_API_BASE_URL, apiKey: config.apiKey || "", models: Array.isArray(config.models) ? config.models.filter(Boolean) : [] });
     }
     return normalized;
 }
@@ -297,7 +298,7 @@ export const useConfigStore = create<ConfigStore>()(
                     config: {
                         ...config,
                         localChannels: normalizeLocalChannels(config),
-                        baseUrl: normalizeLocalChannels(config)[0]?.baseUrl || config.baseUrl,
+                        baseUrl: FIXED_USER_API_BASE_URL,
                         apiKey: normalizeLocalChannels(config)[0]?.apiKey || config.apiKey,
                         imageChannelId: config.imageChannelId || normalizeLocalChannels(config)[0]?.id || "",
                         videoChannelId: config.videoChannelId || normalizeLocalChannels(config)[0]?.id || "",

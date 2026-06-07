@@ -1,6 +1,6 @@
 import axios from "axios";
 
-import { buildApiUrl, type AiConfig } from "@/stores/use-config-store";
+import { type AiConfig } from "@/stores/use-config-store";
 import { useUserStore } from "@/stores/use-user-store";
 import { nanoid } from "nanoid";
 import { dataUrlToFile } from "@/lib/image-utils";
@@ -168,21 +168,17 @@ function withSystemPrompt(config: AiConfig, prompt: string) {
     return systemPrompt ? `${systemPrompt}\n\n${prompt}` : prompt;
 }
 
-function aiApiUrl(config: AiConfig, path: string) {
-    return config.channelMode === "remote" ? `/api/v1${path}` : buildApiUrl(config.baseUrl, path);
+function aiApiUrl(_config: AiConfig, path: string) {
+    return `/api/v1${path}`;
 }
 
 function aiHeaders(config: AiConfig, contentType?: string) {
     const token = useUserStore.getState().token;
-    return config.channelMode === "remote"
-        ? {
-              ...(token ? { Authorization: `Bearer ${token}` } : {}),
-              ...(contentType ? { "Content-Type": contentType } : {}),
-          }
-        : {
-              Authorization: `Bearer ${config.apiKey}`,
-              ...(contentType ? { "Content-Type": contentType } : {}),
-          };
+    return {
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...(config.channelMode === "local" ? { "X-Shengtu-User-Api-Key": config.apiKey.trim() } : {}),
+        ...(contentType ? { "Content-Type": contentType } : {}),
+    };
 }
 
 function refreshRemoteUser(config: AiConfig) {
@@ -318,10 +314,8 @@ export async function requestImageQuestion(config: AiConfig, messages: ChatCompl
 export async function fetchImageModels(config: AiConfig) {
     if (config.channelMode === "remote") return config.models;
     try {
-        const response = await axios.get<{ data?: Array<{ id?: string }>; error?: { message?: string } }>(buildApiUrl(config.baseUrl, "/models"), {
-            headers: {
-                Authorization: `Bearer ${config.apiKey}`,
-            },
+        const response = await axios.get<{ data?: Array<{ id?: string }>; error?: { message?: string } }>("/api/v1/models", {
+            headers: aiHeaders(config),
         });
         return (response.data.data || [])
             .map((model) => model.id)

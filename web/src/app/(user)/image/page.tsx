@@ -6,6 +6,8 @@ import { App, Button, Checkbox, Drawer, Empty, Image, Input, Modal, Tag, Tooltip
 import localforage from "localforage";
 import { saveAs } from "file-saver";
 
+import { ChannelBillingHint } from "@/components/channel-billing-hint";
+import { LocalStorageNotice } from "@/components/local-storage-notice";
 import { ImageSettingsPanel } from "@/components/image-settings-panel";
 import { ModelPicker } from "@/components/model-picker";
 import { PromptSelectDialog } from "@/components/prompts/prompt-select-dialog";
@@ -20,6 +22,7 @@ import { requestEdit, requestGeneration } from "@/services/api/image";
 import { deleteStoredImages, resolveImageUrl, uploadImage } from "@/services/image-storage";
 import { useAssetStore } from "@/stores/use-asset-store";
 import type { ReferenceImage } from "@/types/image";
+import { requestCreditCost } from "@/constant/credits";
 
 type GeneratedImage = {
     id: string;
@@ -76,6 +79,8 @@ export default function ImagePage() {
     const isAiConfigReady = useConfigStore((state) => state.isAiConfigReady);
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
     const addAsset = useAssetStore((state) => state.addAsset);
+    const modelCosts = useConfigStore((state) => state.publicSettings?.modelChannel.modelCosts);
+    const allowCustomChannel = useConfigStore((state) => state.publicSettings?.modelChannel.allowCustomChannel === true);
     const [prompt, setPrompt] = useState("");
     const [references, setReferences] = useState<ReferenceImage[]>([]);
     const [results, setResults] = useState<GenerationResult[]>([]);
@@ -94,6 +99,7 @@ export default function ImagePage() {
     const model = effectiveConfig.imageModel || effectiveConfig.model;
     const canGenerate = Boolean(prompt.trim());
     const generationCount = Math.max(1, Math.min(10, Number(config.count) || 1));
+    const estimatedCredits = requestCreditCost({ channelMode: effectiveConfig.channelMode, modelCosts, model, count: generationCount });
 
     useEffect(() => {
         if (!running || !startedAt) return;
@@ -339,6 +345,8 @@ export default function ImagePage() {
                             </div>
                         </div>
 
+                        <LocalStorageNotice scope="image" compact className="mt-4" />
+
                         <div className="mt-6 space-y-5">
                             <div>
                                 <div className="mb-2 flex items-center justify-between gap-3">
@@ -409,6 +417,7 @@ export default function ImagePage() {
                         </div>
 
                         <div className="mt-auto pt-6">
+                            <ChannelBillingHint config={effectiveConfig} credits={estimatedCredits} className="mb-3" onChannelModeChange={allowCustomChannel ? (mode) => updateConfig("channelMode", mode) : undefined} />
                             <Button type="primary" size="large" block icon={<Sparkles className="size-4" />} loading={running} disabled={!canGenerate || running} onClick={() => void generate()}>
                                 开始生成
                             </Button>

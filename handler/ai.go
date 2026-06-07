@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/basketikun/infinite-canvas/model"
 	"github.com/basketikun/infinite-canvas/service"
 )
 
@@ -42,10 +43,40 @@ func AIVideoContent(w http.ResponseWriter, r *http.Request, id string) {
 	proxyAIGetRequest(w, r, "/videos/"+id+"/content")
 }
 
+func AIModels(w http.ResponseWriter, r *http.Request) {
+	channel, err := service.FixedUserModelChannel(r.Header.Get(service.UserAPIKeyHeader), "")
+	if err != nil {
+		FailError(w, err)
+		return
+	}
+	request, err := http.NewRequest(http.MethodGet, service.BuildModelChannelURL(channel, "/models"), nil)
+	if err != nil {
+		Fail(w, "AI interface request failed")
+		return
+	}
+	request.Header.Set("Authorization", "Bearer "+channel.APIKey)
+	copyAIResponse(w, request, nil)
+}
+
 func proxyAIGetRequest(w http.ResponseWriter, r *http.Request, path string) {
 	modelName := r.URL.Query().Get("model")
 	if strings.TrimSpace(modelName) == "" {
 		modelName = "grok-imagine-video"
+	}
+	if channel, ok, err := fixedUserChannelFromRequest(r, modelName); ok || err != nil {
+		if err != nil {
+			FailError(w, err)
+			return
+		}
+		path = resolveAIProxyPath(channel.BaseURL, modelName, path)
+		request, err := http.NewRequest(http.MethodGet, service.BuildModelChannelURL(channel, path), nil)
+		if err != nil {
+			Fail(w, "AI interface request failed")
+			return
+		}
+		request.Header.Set("Authorization", "Bearer "+channel.APIKey)
+		copyAIResponse(w, request, nil)
+		return
 	}
 	channel, err := service.SelectModelChannel(modelName)
 	if err != nil {
@@ -67,32 +98,51 @@ func proxyAIRequest(w http.ResponseWriter, r *http.Request, path string) {
 	body, contentType, modelName, err := readAIRequest(r)
 	if err != nil {
 		log.Printf("AI proxy request read failed: %v", err)
-		Fail(w, "AI 接口请求失败")
+		Fail(w, "AI interface request failed")
+		return
+	}
+	if channel, ok, err := fixedUserChannelFromRequest(r, modelName); ok || err != nil {
+		if err != nil {
+			FailError(w, err)
+			return
+		}
+		path = resolveAIProxyPath(channel.BaseURL, modelName, path)
+		request, err := http.NewRequest(http.MethodPost, service.BuildModelChannelURL(channel, path), bytes.NewReader(body))
+		if err != nil {
+			log.Printf("AI proxy build user-key request failed: url=%s err=%v", service.BuildModelChannelURL(channel, path), err)
+			Fail(w, "AI interface request failed")
+			return
+		}
+		request.Header.Set("Authorization", "Bearer "+channel.APIKey)
+		if contentType != "" {
+			request.Header.Set("Content-Type", contentType)
+		}
+		copyAIResponse(w, request, nil)
 		return
 	}
 	user, ok := service.UserFromContext(r.Context())
 	if !ok {
-		Fail(w, "未登录或权限不足")
+		Fail(w, "Not logged in or permission denied")
 		return
 	}
 	credits, err := service.ModelCost(modelName)
 	if err != nil {
 		log.Printf("AI proxy read model cost failed: model=%s err=%v", modelName, err)
-		Fail(w, "AI 接口请求失败")
+		Fail(w, "AI interface request failed")
 		return
 	}
 	credits *= readAIRequestCount(body, contentType)
 	channel, err := service.SelectModelChannel(modelName)
 	if err != nil {
 		log.Printf("AI proxy select channel failed: model=%s err=%v", modelName, err)
-		Fail(w, "AI 接口请求失败")
+		Fail(w, "AI interface request failed")
 		return
 	}
 	path = resolveAIProxyPath(channel.BaseURL, modelName, path)
 	request, err := http.NewRequest(http.MethodPost, service.BuildModelChannelURL(channel, path), bytes.NewReader(body))
 	if err != nil {
 		log.Printf("AI proxy build request failed: url=%s err=%v", service.BuildModelChannelURL(channel, path), err)
-		Fail(w, "AI 接口请求失败")
+		Fail(w, "AI interface request failed")
 		return
 	}
 	request.Header.Set("Authorization", "Bearer "+channel.APIKey)
@@ -108,6 +158,15 @@ func proxyAIRequest(w http.ResponseWriter, r *http.Request, path string) {
 			log.Printf("AI proxy refund credits failed: user=%s model=%s credits=%d err=%v", user.ID, modelName, credits, err)
 		}
 	})
+}
+
+func fixedUserChannelFromRequest(r *http.Request, modelName string) (model.ModelChannel, bool, error) {
+	apiKey := strings.TrimSpace(r.Header.Get(service.UserAPIKeyHeader))
+	if apiKey == "" {
+		return model.ModelChannel{}, false, nil
+	}
+	channel, err := service.FixedUserModelChannel(apiKey, modelName)
+	return channel, true, err
 }
 
 func copyAIResponse(w http.ResponseWriter, request *http.Request, onFailure func()) {

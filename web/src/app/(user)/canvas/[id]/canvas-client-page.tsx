@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent as ReactChangeEvent, DragEvent as ReactDragEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { BookOpen, Home, ImageIcon, Images, List, Menu, MessageSquare, Music2, Plus, Redo2, Settings2, Trash2, Undo2, Upload, Video } from "lucide-react";
+import { BookOpen, Database, Home, ImageIcon, Images, List, Menu, MessageSquare, Music2, Plus, Redo2, Settings2, Trash2, Undo2, Upload, Video } from "lucide-react";
 import { saveAs } from "file-saver";
 
 import { requestEdit, requestGeneration, requestImageQuestion } from "@/services/api/image";
@@ -17,6 +17,7 @@ import { nanoid } from "nanoid";
 import { getDataUrlByteSize, readImageMeta } from "@/lib/image-utils";
 import { canvasThemes, type CanvasBackgroundMode } from "@/lib/canvas-theme";
 import { UserStatusActions } from "@/components/layout/user-status-actions";
+import { LocalStorageNotice } from "@/components/local-storage-notice";
 import { useAssetStore } from "@/stores/use-asset-store";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { cropDataUrl, upscaleDataUrl } from "../utils/canvas-image-data";
@@ -2616,6 +2617,7 @@ function CanvasTopBar({
     const titleRef = useRef<HTMLDivElement>(null);
     const accountRef = useRef<HTMLDivElement>(null);
     const [shortcutsOpen, setShortcutsOpen] = useState(false);
+    const [storageHelpOpen, setStorageHelpOpen] = useState(false);
     const [accountOpen, setAccountOpen] = useState(false);
 
     useEffect(() => {
@@ -2652,6 +2654,7 @@ function CanvasTopBar({
                                 { key: "delete", danger: true, icon: <Trash2 className="size-4" />, label: "删除当前画布", onClick: onDeleteProject },
                                 { type: "divider" },
                                 { key: "import", icon: <Upload className="size-4" />, label: "导入素材", onClick: onImportImage },
+                                { key: "storage", icon: <Database className="size-4" />, label: "本地保存说明", onClick: () => setStorageHelpOpen(true) },
                                 { type: "divider" },
                                 { key: "undo", disabled: !canUndo, icon: <Undo2 className="size-4" />, label: <MenuLabel text="撤销" shortcut="⌘ Z" />, onClick: onUndo },
                                 { key: "redo", disabled: !canRedo, icon: <Redo2 className="size-4" />, label: <MenuLabel text="重做" shortcut="⌘ ⇧ Z / ⌘ Y" />, onClick: onRedo },
@@ -2718,6 +2721,9 @@ function CanvasTopBar({
                     ) : null}
                 </div>
             </div>
+            <Modal title="本地保存说明" open={storageHelpOpen} onCancel={() => setStorageHelpOpen(false)} footer={null} centered>
+                <LocalStorageNotice scope="canvas" className="border-0 bg-transparent px-0 py-0 shadow-none" />
+            </Modal>
             <Modal title="快捷键" open={shortcutsOpen} onCancel={() => setShortcutsOpen(false)} footer={null} centered>
                 <div className="space-y-2 border-t pt-4 text-sm" style={{ borderColor: theme.node.stroke }}>
                     <Shortcut keys={["拖动画布"]} value="平移视图" />

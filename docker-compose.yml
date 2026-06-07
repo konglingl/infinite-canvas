@@ -1,14 +1,24 @@
-services:
+﻿services:
   app:
-    image: infinite-canvas:local
+    image: shengtu:latest
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: infinite-canvas
+    container_name: shengtu
     env_file:
       - .env
+    environment:
+      SHENGTU_SUB2API_INTERNAL_BASE_URL: http://172.18.0.1:28081
     volumes:
       - ./data:/app/data
     ports:
-      - "13000:13000"
+      - "127.0.0.1:13928:3000"
     restart: unless-stopped
+    networks:
+      - default
+      - sub2api_auth
+
+networks:
+  sub2api_auth:
+    external: true
+    name: shengtu_sub2api_auth

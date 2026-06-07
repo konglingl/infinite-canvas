@@ -8,6 +8,8 @@ import { nanoid } from "nanoid";
 import { saveAs } from "file-saver";
 
 import { AssetPickerModal, type InsertAssetPayload } from "@/app/(user)/canvas/components/asset-picker-modal";
+import { ChannelBillingHint } from "@/components/channel-billing-hint";
+import { LocalStorageNotice } from "@/components/local-storage-notice";
 import { ModelPicker } from "@/components/model-picker";
 import { PromptSelectDialog } from "@/components/prompts/prompt-select-dialog";
 import { VideoSettingsPanel, normalizeVideoResolutionValue, normalizeVideoSizeValue, videoSizeLabel } from "@/components/video-settings-panel";
@@ -18,6 +20,7 @@ import { deleteStoredMedia, resolveMediaUrl, uploadMediaFile } from "@/services/
 import { resolveImageUrl, uploadImage } from "@/services/image-storage";
 import { requestVideoGeneration, storeGeneratedVideo } from "@/services/api/video";
 import { useAssetStore } from "@/stores/use-asset-store";
+import { requestCreditCost } from "@/constant/credits";
 import { useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
 import { useThemeStore } from "@/stores/use-theme-store";
 import type { ReferenceImage } from "@/types/image";
@@ -77,6 +80,8 @@ export default function VideoPage() {
     const isAiConfigReady = useConfigStore((state) => state.isAiConfigReady);
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
     const addAsset = useAssetStore((state) => state.addAsset);
+    const modelCosts = useConfigStore((state) => state.publicSettings?.modelChannel.modelCosts);
+    const allowCustomChannel = useConfigStore((state) => state.publicSettings?.modelChannel.allowCustomChannel === true);
     const [prompt, setPrompt] = useState("");
     const [references, setReferences] = useState<ReferenceImage[]>([]);
     const [videoReferences, setVideoReferences] = useState<ReferenceVideo[]>([]);
@@ -96,6 +101,7 @@ export default function VideoPage() {
 
     const model = effectiveConfig.videoModel || effectiveConfig.model;
     const canGenerate = Boolean(prompt.trim());
+    const estimatedCredits = requestCreditCost({ channelMode: effectiveConfig.channelMode, modelCosts, model, count: 1 });
 
     useEffect(() => {
         if (!running || !startedAt) return;
@@ -319,6 +325,8 @@ export default function VideoPage() {
                             </div>
                         </div>
 
+                        <LocalStorageNotice scope="video" compact className="mt-4" />
+
                         <div className="mt-6 space-y-5">
                             <div>
                                 <div className="mb-2 flex items-center justify-between gap-3">
@@ -425,6 +433,7 @@ export default function VideoPage() {
                         </div>
 
                         <div className="mt-auto pt-6">
+                            <ChannelBillingHint config={effectiveConfig} credits={estimatedCredits} className="mb-3" onChannelModeChange={allowCustomChannel ? (mode) => updateConfig("channelMode", mode) : undefined} />
                             <Button type="primary" size="large" block icon={<Sparkles className="size-4" />} loading={running} disabled={!canGenerate || running} onClick={() => void generate()}>
                                 开始生成
                             </Button>

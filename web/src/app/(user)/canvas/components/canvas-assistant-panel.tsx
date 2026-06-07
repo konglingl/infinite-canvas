@@ -6,9 +6,10 @@ import { Button, Modal, Tooltip } from "antd";
 import { motion } from "motion/react";
 
 import { ImageGenerationPending } from "@/components/image-generation-pending";
+import { ChannelBillingCost, ChannelBillingHint } from "@/components/channel-billing-hint";
 import { ModelPicker } from "@/components/model-picker";
 import { useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
-import { CreditSymbol, requestCreditCost } from "@/constant/credits";
+import { requestCreditCost } from "@/constant/credits";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { nanoid } from "nanoid";
 import { cn } from "@/lib/utils";
@@ -45,6 +46,7 @@ export function CanvasAssistantPanel({ nodes, selectedNodeIds, sessions, activeS
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const effectiveConfig = useEffectiveConfig();
     const modelCosts = useConfigStore((state) => state.publicSettings?.modelChannel.modelCosts);
+    const allowCustomChannel = useConfigStore((state) => state.publicSettings?.modelChannel.allowCustomChannel === true);
     const cleanupImages = useAssetStore((state) => state.cleanupImages);
     const updateConfig = useConfigStore((state) => state.updateConfig);
     const isAiConfigReady = useConfigStore((state) => state.isAiConfigReady);
@@ -332,6 +334,7 @@ export function CanvasAssistantPanel({ nodes, selectedNodeIds, sessions, activeS
                         }}
                         onPasteImage={onPasteImage}
                         modelCosts={modelCosts}
+                        onChannelModeChange={allowCustomChannel ? (channelMode) => updateConfig("channelMode", channelMode) : undefined}
                     />
                 ) : null}
 
@@ -377,6 +380,7 @@ function AssistantComposer({
     onRemoveReference,
     onPasteImage,
     modelCosts,
+    onChannelModeChange,
 }: {
     mode: AssistantMode;
     prompt: string;
@@ -391,6 +395,7 @@ function AssistantComposer({
     onRemoveReference: (id: string) => void;
     onPasteImage: (file: File) => void;
     modelCosts?: { model: string; credits: number }[];
+    onChannelModeChange?: (mode: AiConfig["channelMode"]) => void;
 }) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const activeModel = mode === "image" ? config.imageModel || config.model : config.textModel || config.model;
@@ -424,6 +429,7 @@ function AssistantComposer({
                     style={{ color: theme.node.text }}
                     placeholder={mode === "image" ? "描述你想生成或修改的图片" : "输入你想问的问题"}
                 />
+                <ChannelBillingHint config={config} credits={credits} className="mb-2" onChannelModeChange={onChannelModeChange} />
                 <div className="mt-2 flex items-center justify-between gap-2">
                     <div className="canvas-composer-tools flex min-w-0 flex-1 items-center gap-1">
                         <CanvasPromptLibrary onSelect={onPromptChange} />
@@ -445,10 +451,7 @@ function AssistantComposer({
                         aria-label="发送"
                     >
                         <span className="flex items-center gap-1.5">
-                            <span className="inline-flex items-center gap-1 text-xs font-medium tabular-nums">
-                                <CreditSymbol />
-                                {credits.toLocaleString()}
-                            </span>
+                            <ChannelBillingCost config={config} credits={credits} />
                             {isRunning ? <LoaderCircle className="size-4 animate-spin" /> : <ArrowUp className="size-4" />}
                         </span>
                     </Button>

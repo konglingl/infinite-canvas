@@ -22,7 +22,7 @@ export type PromptListResponse = {
     total: number;
 };
 
-export async function fetchPrompts({ keyword = "", tag = [], category = ALL_PROMPTS_OPTION, page, pageSize }: { keyword?: string; tag?: string[]; category?: string; page?: number; pageSize?: number } = {}) {
+export async function fetchPrompts({ keyword = "", tag = [], category = ALL_PROMPTS_OPTION, page, pageSize }: { keyword?: string; tag?: string[]; category?: string; page?: number; pageSize?: number } = {}, token?: string) {
     return apiGet<PromptListResponse>(
         "/api/prompts",
         compactApiParams({
@@ -32,6 +32,7 @@ export async function fetchPrompts({ keyword = "", tag = [], category = ALL_PROM
             ...(page ? { page } : {}),
             ...(pageSize ? { pageSize } : {}),
         }),
+        token,
     );
 }
 

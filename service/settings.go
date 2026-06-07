@@ -2,6 +2,7 @@ package service
 
 import (
 	"encoding/json"
+	"os"
 	"errors"
 	"fmt"
 	"io"
@@ -224,11 +225,38 @@ func SelectModelChannel(modelName string) (model.ModelChannel, error) {
 
 func BuildModelChannelURL(channel model.ModelChannel, path string) string {
 	baseURL := normalizeModelChannelBaseURL(channel.BaseURL)
+	baseURL = rewriteInternalSub2APIBaseURL(baseURL)
 	lowerBaseURL := strings.ToLower(baseURL)
 	if !strings.HasSuffix(lowerBaseURL, "/v1") && !strings.HasSuffix(lowerBaseURL, "/api/v3") && !strings.HasSuffix(lowerBaseURL, "/api/plan/v3") {
 		baseURL += "/v1"
 	}
 	return baseURL + path
+}
+
+func rewriteInternalSub2APIBaseURL(baseURL string) string {
+	internalBaseURL := strings.TrimSpace(os.Getenv(Sub2APIInternalBaseURLEnv))
+	if internalBaseURL == "" {
+		return baseURL
+	}
+	base, err := url.Parse(baseURL)
+	if err != nil || base.Host == "" {
+		return baseURL
+	}
+	publicBase, err := url.Parse(FixedUserModelPublicBaseURL)
+	if err != nil || publicBase.Host == "" || !strings.EqualFold(base.Host, publicBase.Host) {
+		return baseURL
+	}
+	internal, err := url.Parse(strings.TrimRight(internalBaseURL, "/"))
+	if err != nil || internal.Scheme == "" || internal.Host == "" {
+		return baseURL
+	}
+	base.Scheme = internal.Scheme
+	base.Host = internal.Host
+	base.Path = strings.TrimRight(internal.Path, "/") + strings.TrimRight(base.Path, "/")
+	base.RawPath = ""
+	base.RawQuery = ""
+	base.Fragment = ""
+	return strings.TrimRight(base.String(), "/")
 }
 
 func normalizeModelChannelBaseURL(baseURL string) string {

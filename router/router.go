@@ -29,6 +29,7 @@ func New() *gin.Engine {
 		handler.ReferenceMedia(c.Writer, c.Request, c.Param("id"))
 	})
 	v1 := api.Group("/v1", middleware.UserAuth)
+	v1.GET("/models", gin.WrapF(handler.AIModels))
 	v1.POST("/images/generations", gin.WrapF(handler.AIImagesGenerations))
 	v1.POST("/images/edits", gin.WrapF(handler.AIImagesEdits))
 	v1.POST("/chat/completions", gin.WrapF(handler.AIChatCompletions))
@@ -41,7 +42,7 @@ func New() *gin.Engine {
 	v1.GET("/videos/:id/content", func(c *gin.Context) {
 		handler.AIVideoContent(c.Writer, c.Request, c.Param("id"))
 	})
-	api.GET("/prompts", middleware.OptionalAuth, gin.WrapF(handler.Prompts))
+	api.GET("/prompts", middleware.UserAuth, gin.WrapF(handler.Prompts))
 	api.GET("/assets", middleware.OptionalAuth, gin.WrapF(handler.Assets))
 	api.POST("/admin/login", gin.WrapF(handler.AdminLogin))
 
@@ -59,6 +60,8 @@ func New() *gin.Engine {
 	admin.DELETE("/credit-logs/:id", func(c *gin.Context) {
 		handler.AdminDeleteCreditLog(c.Writer, c.Request, c.Param("id"))
 	})
+	admin.GET("/ai-logs", gin.WrapF(handler.AdminAICallLogs))
+	admin.DELETE("/ai-logs", gin.WrapF(handler.AdminDeleteAICallLogs))
 	admin.GET("/settings", gin.WrapF(handler.AdminSettings))
 	admin.POST("/settings", gin.WrapF(handler.AdminSaveSettings))
 	admin.POST("/settings/channel-models", gin.WrapF(handler.AdminChannelModels))

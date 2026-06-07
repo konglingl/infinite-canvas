@@ -563,18 +563,7 @@ func workflowDraftModel(modelName string) (string, error) {
 
 func workflowDraftChannel(request WorkflowAgentDraftRequest, modelName string) (model.ModelChannel, error) {
 	if request.ChannelMode == "local" {
-		channel := normalizeModelChannel(model.ModelChannel{
-			ID:      strings.TrimSpace(request.ChannelID),
-			Name:    "用户本地直连",
-			BaseURL: strings.TrimSpace(request.BaseURL),
-			APIKey:  strings.TrimSpace(request.APIKey),
-			Models:  []string{modelName},
-			Weight:  1,
-		})
-		if channel.BaseURL == "" || channel.APIKey == "" {
-			return model.ModelChannel{}, errors.New("文本模型本地直连渠道配置不完整")
-		}
-		return channel, nil
+		return FixedUserModelChannel(request.APIKey, modelName)
 	}
 	return SelectModelChannelForModel(modelName, request.ChannelID)
 }

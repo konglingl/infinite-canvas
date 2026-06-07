@@ -9,6 +9,7 @@ import { useCopyText } from "@/hooks/use-copy-text";
 import { formatBytes, readFileAsDataUrl } from "@/lib/image-utils";
 import { uploadImage } from "@/services/image-storage";
 import { cn } from "@/lib/utils";
+import { LocalStorageNotice } from "@/components/local-storage-notice";
 import { useAssetStore, type Asset, type AssetKind, type ImageAsset } from "@/stores/use-asset-store";
 import { exportAssets, readAssetPackage } from "./asset-transfer";
 
@@ -222,6 +223,8 @@ export default function AssetsPage() {
                         <h1 className="text-4xl font-semibold tracking-tight text-stone-950 dark:text-stone-100">我的素材</h1>
                         <p className="mt-3 text-sm text-stone-500 dark:text-stone-400">收藏常用文本和图片，按类型、标题和标签快速查找。</p>
                     </div>
+
+                    <LocalStorageNotice scope="assets" className="mx-auto mt-5 max-w-3xl" />
 
                     <div className="mx-auto mt-8 w-full max-w-2xl">
                         <Input.Search
