@@ -15,8 +15,8 @@ const FixedUserModelBaseURLEnv = "SHENGTU_USER_KEY_BASE_URL"
 
 // FixedUserModelChannel builds the only upstream channel allowed for user-supplied keys.
 // The client may provide its own API key, but it cannot choose or override BaseURL.
-// SHENGTU_USER_KEY_BASE_URL is server-only and lets the deployment bypass public Cloudflare
-// for the fixed upstream, e.g. http://172.18.0.1:28081 on the same VPS.
+// SHENGTU_USER_KEY_BASE_URL and SHENGTU_SUB2API_INTERNAL_BASE_URL are server-only overrides.
+// By default the project uses the public gateway URL below.
 func FixedUserModelChannel(apiKey string, modelName string) (model.ModelChannel, error) {
 	apiKey = strings.TrimSpace(apiKey)
 	if apiKey == "" {

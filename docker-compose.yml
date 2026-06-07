@@ -1,4 +1,4 @@
-﻿services:
+services:
   app:
     image: shengtu:latest
     build:
@@ -8,7 +8,7 @@
     env_file:
       - .env
     environment:
-      SHENGTU_SUB2API_INTERNAL_BASE_URL: http://172.18.0.1:28081
+      SHENGTU_SUB2API_INTERNAL_BASE_URL: https://kongsubapi.959298.xyz
     volumes:
       - ./data:/app/data
     ports:
