@@ -1,12 +1,12 @@
 import { saveAs } from "file-saver";
 
-import { createZip } from "@/lib/zip";
-import { getMediaBlob } from "@/services/file-storage";
-import { getImageBlob } from "@/services/image-storage";
+import { createZip, readZip } from "@/lib/zip";
+import { getMediaBlob, setMediaBlob } from "@/services/file-storage";
+import { getImageBlob, setImageBlob } from "@/services/image-storage";
 import type { CanvasExportAsset, CanvasExportFile } from "../export-types";
 import type { CanvasProject } from "../stores/use-canvas-store";
 
-export async function exportCanvasProjects(projects: CanvasProject[], fileName = "无限画布") {
+export async function createCanvasProjectsBackup(projects: CanvasProject[], fileName = "无限画布") {
     const zipFiles: { name: string; data: BlobPart }[] = [];
     const exportedProjects = await Promise.all(
         projects.map(async (project) => {
@@ -25,8 +25,31 @@ export async function exportCanvasProjects(projects: CanvasProject[], fileName =
     );
 
     const data: CanvasExportFile = { app: "infinite-canvas", version: 3, exportedAt: new Date().toISOString(), projects: exportedProjects };
-    const zip = await createZip([{ name: "projects.json", data: JSON.stringify(data, null, 2) }, ...zipFiles]);
-    saveAs(zip, `${safeFileName(fileName)}.zip`);
+    const blob = await createZip([{ name: "projects.json", data: JSON.stringify(data, null, 2) }, ...zipFiles]);
+    return { blob, fileName: `${safeFileName(fileName)}.zip` };
+}
+
+export async function exportCanvasProjects(projects: CanvasProject[], fileName = "无限画布") {
+    const backup = await createCanvasProjectsBackup(projects, fileName);
+    saveAs(backup.blob, backup.fileName);
+}
+
+export async function readCanvasProjectPackage(file: File) {
+    const zip = await readZip(file);
+    const projectFile = zip.get("projects.json");
+    if (!projectFile) throw new Error("missing projects.json");
+    const data = JSON.parse(await projectFile.text()) as CanvasExportFile;
+    await Promise.all(
+        data.projects.flatMap((project) =>
+            project.files.map(async (item) => {
+                const blob = zip.get(item.path);
+                if (!blob) return;
+                const typedBlob = blob.type ? blob : blob.slice(0, blob.size, item.mimeType);
+                await (item.storageKey.startsWith("image:") ? setImageBlob(item.storageKey, typedBlob) : setMediaBlob(item.storageKey, typedBlob));
+            }),
+        ),
+    );
+    return data.projects.map((item) => item.project);
 }
 
 function collectStorageKeys(value: unknown, keys = new Set<string>()) {
@@ -37,7 +60,7 @@ function collectStorageKeys(value: unknown, keys = new Set<string>()) {
 }
 
 function safeFileName(value: string) {
-    return value.replace(/[\\/:*?"<>|]/g, "_");
+    return value.replace(/[\/:*?"<>|]/g, "_");
 }
 
 function fileExtension(mimeType: string, storageKey: string) {

@@ -20,7 +20,7 @@ type AssetExportItem = {
     bytes: number;
 };
 
-export async function exportAssets(assets: Asset[]) {
+export async function createAssetBackupPackage(assets: Asset[], fileName = "我的素材") {
     const files: AssetExportItem[] = [];
     const zipFiles: { name: string; data: BlobPart }[] = [];
 
@@ -39,8 +39,13 @@ export async function exportAssets(assets: Asset[]) {
     );
 
     const data: AssetExportFile = { app: "infinite-canvas", version: 1, exportedAt: new Date().toISOString(), assets, files };
-    const zip = await createZip([{ name: "assets.json", data: JSON.stringify(data, null, 2) }, ...zipFiles]);
-    saveAs(zip, "我的素材.zip");
+    const blob = await createZip([{ name: "assets.json", data: JSON.stringify(data, null, 2) }, ...zipFiles]);
+    return { blob, fileName: `${safeFileName(fileName)}.zip` };
+}
+
+export async function exportAssets(assets: Asset[], fileName = "我的素材") {
+    const backup = await createAssetBackupPackage(assets, fileName);
+    saveAs(backup.blob, backup.fileName);
 }
 
 export async function readAssetPackage(file: File) {
@@ -60,7 +65,7 @@ export async function readAssetPackage(file: File) {
 }
 
 function safeFileName(value: string) {
-    return value.replace(/[\\/:*?"<>|]/g, "_");
+    return value.replace(/[\/:*?"<>|]/g, "_");
 }
 
 function fileExtension(mimeType: string, kind: Asset["kind"]) {

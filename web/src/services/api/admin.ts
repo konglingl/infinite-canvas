@@ -51,6 +51,24 @@ export type AdminCreditLogListResponse = {
     total: number;
 };
 
+export type AdminRedeemCode = {
+    id: string;
+    code: string;
+    credits: number;
+    totalLimit: number;
+    usedCount: number;
+    enabled: boolean;
+    expiresAt: string;
+    remark: string;
+    createdAt: string;
+    updatedAt: string;
+};
+
+export type AdminRedeemCodeListResponse = {
+    items: AdminRedeemCode[];
+    total: number;
+};
+
 export type AdminAICallLog = {
     id: string;
     userId: string;
@@ -80,6 +98,17 @@ export type AdminUserQuery = {
     pageSize?: number;
 };
 
+export type AdminLogQuery = AdminUserQuery & {
+    userId?: string;
+    type?: string;
+    model?: string;
+    channelId?: string;
+    method?: string;
+    status?: string;
+    startAt?: string;
+    endAt?: string;
+};
+
 export async function fetchAdminUsers(token: string, query: AdminUserQuery = {}) {
     return apiGet<AdminUserListResponse>("/api/admin/users", compactApiParams(query), token);
 }
@@ -96,7 +125,7 @@ export async function deleteAdminUser(token: string, id: string) {
     return apiDelete<boolean>(`/api/admin/users/${encodeURIComponent(id)}`, token);
 }
 
-export async function fetchAdminCreditLogs(token: string, query: AdminUserQuery = {}) {
+export async function fetchAdminCreditLogs(token: string, query: AdminLogQuery = {}) {
     return apiGet<AdminCreditLogListResponse>("/api/admin/credit-logs", compactApiParams(query), token);
 }
 
@@ -108,7 +137,19 @@ export async function deleteAdminCreditLog(token: string, id: string) {
     return apiDelete<boolean>(`/api/admin/credit-logs/${encodeURIComponent(id)}`, token);
 }
 
-export async function fetchAdminAICallLogs(token: string, query: AdminUserQuery = {}) {
+export async function fetchAdminRedeemCodes(token: string, query: AdminUserQuery = {}) {
+    return apiGet<AdminRedeemCodeListResponse>("/api/admin/redeem-codes", compactApiParams(query), token);
+}
+
+export async function saveAdminRedeemCode(token: string, code: Partial<AdminRedeemCode>) {
+    return apiPost<AdminRedeemCode>("/api/admin/redeem-codes", code, token);
+}
+
+export async function deleteAdminRedeemCode(token: string, id: string) {
+    return apiDelete<boolean>(`/api/admin/redeem-codes/${encodeURIComponent(id)}`, token);
+}
+
+export async function fetchAdminAICallLogs(token: string, query: AdminLogQuery = {}) {
     return apiGet<AdminAICallLogListResponse>("/api/admin/ai-logs", compactApiParams(query), token);
 }
 
@@ -240,6 +281,7 @@ export type AdminPublicSettings = {
     modelChannel: AdminPublicModelChannelSettings;
     auth: {
         allowRegister: boolean;
+        requireInviteCode: boolean;
         linuxDo: {
             enabled: boolean;
         };

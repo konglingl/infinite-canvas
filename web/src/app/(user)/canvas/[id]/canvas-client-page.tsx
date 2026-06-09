@@ -33,6 +33,7 @@ import { CanvasNodeAngleDialog, type CanvasImageAngleParams } from "../component
 import { CanvasNodeCropDialog, type CanvasImageCropRect } from "../components/canvas-node-crop-dialog";
 import { CanvasNodeMaskEditDialog, type CanvasImageMaskEditPayload } from "../components/canvas-node-mask-edit-dialog";
 import { CanvasNodeUpscaleDialog, type CanvasImageUpscaleParams } from "../components/canvas-node-upscale-dialog";
+import { CanvasNodeSuperResolveDialog, type CanvasImageSuperResolveParams } from "../components/canvas-node-super-resolve-dialog";
 import { buildNodeChatMessages, buildNodeGenerationContext, buildNodeGenerationInputs, hydrateNodeGenerationContext, type NodeGenerationInput } from "../components/canvas-node-generation";
 import { CanvasNodeHoverToolbar, CanvasNodeInfoModal } from "../components/canvas-node-hover-toolbar";
 import { InfiniteCanvas } from "../components/infinite-canvas";
@@ -90,6 +91,9 @@ const CONNECTION_NODE_HIT_PADDING = 32;
 const NODE_STATUS_LOADING = "loading" as const;
 const NODE_STATUS_SUCCESS = "success" as const;
 const NODE_STATUS_ERROR = "error" as const;
+const CANVAS_IMAGE_MAX_COUNT = 30;
+const CANVAS_IMAGE_BATCH_CONCURRENCY = 10;
+
 const IMAGE_PROMPT_REVERSE_PRESET = `请根据参考图片反推一段适合用于 AI 生图的提示词。
 
 要求：
@@ -569,6 +573,8 @@ function InfiniteCanvasPage() {
         [screenToCanvas],
     );
 
+    const hiddenBatchNodeIds = useMemo(() => buildHiddenBatchNodeIds(nodes, connections, collapsingBatchIds), [collapsingBatchIds, connections, nodes]);
+
     const visibleNodes = useMemo(() => {
         const padding = 280;
         const rect = containerRef.current?.getBoundingClientRect();
@@ -579,8 +585,8 @@ function InfiniteCanvasPage() {
         const viewRight = viewLeft + width / viewport.k + padding * 2;
         const viewBottom = viewTop + height / viewport.k + padding * 2;
 
-        return nodes.filter((node) => !isHiddenBatchChild(node, nodes, collapsingBatchIds) && node.position.x + node.width > viewLeft && node.position.x < viewRight && node.position.y + node.height > viewTop && node.position.y < viewBottom);
-    }, [collapsingBatchIds, nodes, size.height, size.width, viewport.k, viewport.x, viewport.y]);
+        return nodes.filter((node) => !hiddenBatchNodeIds.has(node.id) && node.position.x + node.width > viewLeft && node.position.x < viewRight && node.position.y + node.height > viewTop && node.position.y < viewBottom);
+    }, [hiddenBatchNodeIds, nodes, size.height, size.width, viewport.k, viewport.x, viewport.y]);
 
     const nodeById = useMemo(() => new Map(nodes.map((node) => [node.id, node])), [nodes]);
     const toolbarNode = toolbarNodeId ? nodeById.get(toolbarNodeId) || null : null;
@@ -1234,7 +1240,16 @@ function InfiniteCanvasPage() {
     useEffect(() => {
         const handleKeyDown = (event: KeyboardEvent) => {
             const target = event.target instanceof Element ? event.target : null;
-            if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement || event.target instanceof HTMLSelectElement || target?.closest("[contenteditable='true'],[data-canvas-no-zoom]")) return;
+            const selection = window.getSelection();
+            const selectionInNoCanvasZoom = Boolean(
+                selection &&
+                    !selection.isCollapsed &&
+                    [selection.anchorNode, selection.focusNode].some((node) => {
+                        const element = node instanceof Element ? node : node?.parentElement;
+                        return Boolean(element?.closest("[data-canvas-no-zoom]"));
+                    }),
+            );
+            if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement || event.target instanceof HTMLSelectElement || target?.closest("[contenteditable='true'],[data-canvas-no-zoom]") || selectionInNoCanvasZoom) return;
 
             const key = event.key.toLowerCase();
             const isModifierShortcut = event.metaKey || event.ctrlKey;
@@ -1455,22 +1470,25 @@ function InfiniteCanvasPage() {
                 return;
             }
 
-            const gap = 96;
+            const gap = 80;
             const textSpec = NODE_DEFAULT_SIZE[CanvasNodeType.Text];
-            const configSpec = NODE_DEFAULT_SIZE[CanvasNodeType.Config];
+            const reverseTextSpec = { ...textSpec, width: 425, height: 300 };
+            const reverseConfigSpec = { ...NODE_DEFAULT_SIZE[CanvasNodeType.Config], width: 420, height: 360 };
             const centerY = node.position.y + node.height / 2;
             const textNode = {
                 ...createCanvasNode(
                     CanvasNodeType.Text,
-                    { x: node.position.x + node.width + gap + textSpec.width / 2, y: centerY },
+                    { x: node.position.x + node.width + gap + reverseTextSpec.width / 2, y: centerY },
                     { content: IMAGE_PROMPT_REVERSE_PRESET, prompt: IMAGE_PROMPT_REVERSE_PRESET, status: NODE_STATUS_SUCCESS, fontSize: 14 },
                 ),
                 title: "反推提示词",
+                width: reverseTextSpec.width,
+                height: reverseTextSpec.height,
             };
             const configNode = {
                 ...createCanvasNode(
                     CanvasNodeType.Config,
-                    { x: textNode.position.x + textNode.width + gap + configSpec.width / 2, y: centerY },
+                    { x: textNode.position.x + textNode.width + gap + reverseConfigSpec.width / 2, y: centerY },
                     {
                         generationMode: "text",
                         model: effectiveConfig.textModel || effectiveConfig.model || defaultConfig.textModel,
@@ -1479,6 +1497,8 @@ function InfiniteCanvasPage() {
                     },
                 ),
                 title: "反推提示词配置",
+                width: reverseConfigSpec.width,
+                height: reverseConfigSpec.height,
             };
 
             setNodes((prev) => [...prev, textNode, configNode]);
@@ -1591,6 +1611,53 @@ function InfiniteCanvasPage() {
         setSelectedNodeIds(new Set([childId]));
         setDialogNodeId(childId);
     }, []);
+
+    const generateSuperResolveNode = useCallback(
+        async (node: CanvasNodeData, params: CanvasImageSuperResolveParams) => {
+            if (!node.metadata?.content) return;
+            const generationConfig = { ...buildGenerationConfig(effectiveConfig, node, "image"), count: "1", size: params.size || node.metadata?.size || "auto" };
+            if (!isAiConfigReady(generationConfig, generationConfig.model)) {
+                openConfigDialog(true);
+                return;
+            }
+            const source = { id: node.id, name: `${node.title || node.id}.png`, type: node.metadata.mimeType || "image/png", dataUrl: node.metadata.content, storageKey: node.metadata.storageKey };
+            const prompt = params.prompt.trim();
+            const childId = nanoid();
+            const imageConfig = NODE_DEFAULT_SIZE[CanvasNodeType.Image];
+            const generationMetadata = buildImageGenerationMetadata("edit", generationConfig, 1, [source]);
+            setSuperResolveNodeId(null);
+            setRunningNodeId(childId);
+            setNodes((prev) => [
+                ...prev,
+                {
+                    id: childId,
+                    type: CanvasNodeType.Image,
+                    title: `${params.targetLabel} AI \u8d85\u5206`,
+                    position: { x: node.position.x + node.width + 96, y: node.position.y },
+                    width: node.width || imageConfig.width,
+                    height: node.height || imageConfig.height,
+                    metadata: { prompt, status: NODE_STATUS_LOADING, ...generationMetadata },
+                },
+            ]);
+            setConnections((prev) => [...prev, { id: nanoid(), fromNodeId: node.id, toNodeId: childId }]);
+            setSelectedNodeIds(new Set([childId]));
+            setSelectedConnectionId(null);
+            setDialogNodeId(childId);
+            try {
+                const image = await requestEdit(generationConfig, prompt, [source]).then((items) => items[0]);
+                const uploaded = await uploadImage(image.dataUrl);
+                const size = fitNodeSize(uploaded.width, uploaded.height, imageConfig.width, imageConfig.height);
+                setNodes((prev) => prev.map((item) => (item.id === childId ? { ...item, width: size.width, height: size.height, metadata: { ...item.metadata, ...imageMetadata(uploaded), prompt, ...generationMetadata } } : item)));
+            } catch (error) {
+                const errorDetails = error instanceof Error ? error.message : "AI \u8d85\u5206\u5931\u8d25";
+                message.error(errorDetails);
+                setNodes((prev) => prev.map((item) => (item.id === childId ? { ...item, metadata: { ...item.metadata, status: NODE_STATUS_ERROR, errorDetails } } : item)));
+            } finally {
+                setRunningNodeId(null);
+            }
+        },
+        [effectiveConfig, isAiConfigReady, message, openConfigDialog],
+    );
 
     const generateAngleNode = useCallback(
         async (node: CanvasNodeData, params: CanvasImageAngleParams) => {
@@ -1810,7 +1877,9 @@ function InfiniteCanvasPage() {
                     const imageConfig = NODE_DEFAULT_SIZE[CanvasNodeType.Image];
                     const parentPosition = sourceNode?.position || { x: 0, y: 0 };
                     const gap = 96;
+                    const columnGap = 36;
                     const rowGap = 36;
+                    const batchGrid = getVerticalImageBatchGrid(count);
                     const rootId = isEmptyImageNode ? nodeId : nanoid();
                     const childIds = count > 1 ? Array.from({ length: count }, () => nanoid()) : [];
                     const targetIds = count > 1 ? childIds : [rootId];
@@ -1840,8 +1909,8 @@ function InfiniteCanvasPage() {
                         type: CanvasNodeType.Image,
                         title: effectivePrompt.slice(0, 32) || "Generated Image",
                         position: {
-                            x: rootNode.position.x + rootNode.width + 120 + (index % 2) * (imageConfig.width + 36),
-                            y: rootNode.position.y + Math.floor(index / 2) * (imageConfig.height + rowGap),
+                            x: rootNode.position.x + rootNode.width + 120 + (index % batchGrid.columns) * (imageConfig.width + columnGap),
+                            y: rootNode.position.y + Math.floor(index / batchGrid.columns) * (imageConfig.height + rowGap),
                         },
                         width: imageConfig.width,
                         height: imageConfig.height,
@@ -1891,9 +1960,8 @@ function InfiniteCanvasPage() {
 
                     let hasSuccess = false;
                     let hasFailure = false;
-                    await Promise.all(
-                        targetIds.map(async (targetId) => {
-                            try {
+                    await mapWithConcurrency(targetIds, CANVAS_IMAGE_BATCH_CONCURRENCY, async (targetId) => {
+                        try {
                                 const image = referenceImages.length
                                     ? await requestEdit({ ...generationConfig, count: "1" }, effectivePrompt, referenceImages).then((items) => items[0])
                                     : await requestGeneration({ ...generationConfig, count: "1" }, effectivePrompt).then((items) => items[0]);
@@ -1932,8 +2000,7 @@ function InfiniteCanvasPage() {
                                 setNodes((prev) => prev.map((node) => (node.id === targetId ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_ERROR, errorDetails } } : node)));
                                 return false;
                             }
-                        }),
-                    );
+                    });
                     if (hasFailure) message.error(hasSuccess ? "部分图片生成失败" : "全部图片生成失败");
                     setNodes((prev) =>
                         prev.map((node) =>
@@ -2293,7 +2360,7 @@ function InfiniteCanvasPage() {
                             .filter((connection) => {
                                 const from = nodeById.get(connection.fromNodeId);
                                 const to = nodeById.get(connection.toNodeId);
-                                return Boolean(from && to && !isHiddenBatchConnectionEndpoint(from, nodes) && !isHiddenBatchConnectionEndpoint(to, nodes));
+                                return Boolean(from && to && !hiddenBatchNodeIds.has(from.id) && !hiddenBatchNodeIds.has(to.id));
                             })
                             .map((connection) => {
                                 const from = nodeById.get(connection.fromNodeId);
@@ -2511,9 +2578,7 @@ function InfiniteCanvasPage() {
 
                 {upscaleNode?.metadata?.content ? <CanvasNodeUpscaleDialog dataUrl={upscaleNode.metadata.content} open={Boolean(upscaleNode)} onClose={() => setUpscaleNodeId(null)} onConfirm={(params) => void upscaleImageNode(upscaleNode!, params)} /> : null}
 
-                <Modal title="AI 超分" open={Boolean(superResolveNode?.metadata?.content)} centered footer={null} onCancel={() => setSuperResolveNodeId(null)}>
-                    <div className="py-8 text-center text-base font-medium">暂未实现</div>
-                </Modal>
+                {superResolveNode?.metadata?.content ? <CanvasNodeSuperResolveDialog dataUrl={superResolveNode.metadata.content} open={Boolean(superResolveNode)} onClose={() => setSuperResolveNodeId(null)} onConfirm={(params) => void generateSuperResolveNode(superResolveNode!, params)} /> : null}
 
                 {angleNode?.metadata?.content ? <CanvasNodeAngleDialog dataUrl={angleNode.metadata.content} open={Boolean(angleNode)} onClose={() => setAngleNodeId(null)} onConfirm={(params) => void generateAngleNode(angleNode!, params)} /> : null}
 
@@ -2881,8 +2946,29 @@ async function hydrateAssistantImages(sessions: CanvasAssistantSession[]) {
     );
 }
 
+async function mapWithConcurrency<T>(items: T[], limit: number, worker: (item: T, index: number) => Promise<unknown>) {
+    const safeLimit = Math.max(1, Math.floor(limit));
+    let cursor = 0;
+    const runners = Array.from({ length: Math.min(safeLimit, items.length) }, async () => {
+        while (cursor < items.length) {
+            const index = cursor;
+            cursor += 1;
+            await worker(items[index], index);
+        }
+    });
+    await Promise.all(runners);
+}
+
+function getVerticalImageBatchGrid(count: number) {
+    if (count <= 1) return { columns: 1, rows: 1 };
+    if (count === 2) return { columns: 1, rows: 2 };
+    if (count <= 4) return { columns: 2, rows: Math.ceil(count / 2) };
+    const columns = Math.max(2, Math.floor(Math.sqrt(count)));
+    return { columns, rows: Math.ceil(count / columns) };
+}
+
 function getGenerationCount(count: string) {
-    return Math.max(1, Math.min(15, Math.floor(Math.abs(Number(count)) || 1)));
+    return Math.max(1, Math.min(CANVAS_IMAGE_MAX_COUNT, Math.floor(Math.abs(Number(count)) || 1)));
 }
 
 function applyNodeConfigPatch(node: CanvasNodeData, patch: Partial<CanvasNodeData["metadata"]>) {
@@ -2972,6 +3058,41 @@ function sourceNodeReferenceImages(node: CanvasNodeData | null) {
 
 function isAudioFile(file: File) {
     return file.type.startsWith("audio/") || /\.(mp3|wav)$/i.test(file.name);
+}
+
+function buildHiddenBatchNodeIds(nodes: CanvasNodeData[], connections: CanvasConnection[], collapsingBatchIds?: Set<string>) {
+    const hidden = new Set<string>();
+    const nodeById = new Map(nodes.map((node) => [node.id, node]));
+    const connectionsByNodeId = new Map<string, CanvasConnection[]>();
+    connections.forEach((connection) => {
+        connectionsByNodeId.set(connection.fromNodeId, [...(connectionsByNodeId.get(connection.fromNodeId) || []), connection]);
+        connectionsByNodeId.set(connection.toNodeId, [...(connectionsByNodeId.get(connection.toNodeId) || []), connection]);
+    });
+
+    nodes.forEach((root) => {
+        if (!root.metadata?.isBatchRoot || root.metadata.imageBatchExpanded || collapsingBatchIds?.has(root.id)) return;
+        const batchChildIds = new Set(root.metadata.batchChildIds || []);
+        const queue: string[] = [...batchChildIds];
+        connections.forEach((connection) => {
+            if (connection.fromNodeId === root.id || batchChildIds.has(connection.fromNodeId)) queue.push(connection.toNodeId);
+        });
+        const visited = new Set<string>([root.id]);
+        while (queue.length) {
+            const nodeId = queue.shift();
+            if (!nodeId || visited.has(nodeId) || nodeId === root.id) continue;
+            visited.add(nodeId);
+            const node = nodeById.get(nodeId);
+            if (!node) continue;
+            if (node.metadata?.isBatchRoot && node.id !== root.id) continue;
+            hidden.add(node.id);
+            (connectionsByNodeId.get(node.id) || []).forEach((connection) => {
+                const nextId = connection.fromNodeId === node.id ? connection.toNodeId : connection.fromNodeId;
+                if (nextId !== root.id && !visited.has(nextId)) queue.push(nextId);
+            });
+        }
+    });
+
+    return hidden;
 }
 
 function isHiddenBatchChild(node: CanvasNodeData, nodes: CanvasNodeData[], collapsingBatchIds?: Set<string>) {

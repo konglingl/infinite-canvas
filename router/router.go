@@ -21,6 +21,7 @@ func New() *gin.Engine {
 	api.GET("/auth/linux-do/authorize", gin.WrapF(handler.LinuxDoAuthorize))
 	api.GET("/auth/linux-do/callback", gin.WrapF(handler.LinuxDoCallback))
 	api.GET("/auth/me", middleware.OptionalAuth, gin.WrapF(handler.CurrentUser))
+	api.POST("/auth/redeem-code", middleware.UserAuth, gin.WrapF(handler.RedeemCode))
 	api.GET("/settings", gin.WrapF(handler.Settings))
 	api.GET("/media/references/:id", func(c *gin.Context) {
 		handler.ReferenceMedia(c.Writer, c.Request, c.Param("id"))
@@ -36,6 +37,7 @@ func New() *gin.Engine {
 	v1.POST("/audio/speech", gin.WrapF(handler.AIAudioSpeech))
 	v1.POST("/videos", gin.WrapF(handler.AIVideos))
 	v1.POST("/media/references", gin.WrapF(handler.UploadReferenceMedia))
+	v1.POST("/ai-logs", gin.WrapF(handler.ClientAICallLog))
 	v1.GET("/videos/:id", func(c *gin.Context) {
 		handler.AIVideo(c.Writer, c.Request, c.Param("id"))
 	})
@@ -59,6 +61,11 @@ func New() *gin.Engine {
 	admin.POST("/credit-logs", gin.WrapF(handler.AdminSaveCreditLog))
 	admin.DELETE("/credit-logs/:id", func(c *gin.Context) {
 		handler.AdminDeleteCreditLog(c.Writer, c.Request, c.Param("id"))
+	})
+	admin.GET("/redeem-codes", gin.WrapF(handler.AdminRedeemCodes))
+	admin.POST("/redeem-codes", gin.WrapF(handler.AdminSaveRedeemCode))
+	admin.DELETE("/redeem-codes/:id", func(c *gin.Context) {
+		handler.AdminDeleteRedeemCode(c.Writer, c.Request, c.Param("id"))
 	})
 	admin.GET("/ai-logs", gin.WrapF(handler.AdminAICallLogs))
 	admin.DELETE("/ai-logs", gin.WrapF(handler.AdminDeleteAICallLogs))

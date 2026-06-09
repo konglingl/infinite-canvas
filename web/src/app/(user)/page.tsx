@@ -36,7 +36,7 @@ export default function IndexPage() {
         if (!isUserReady || !token) return;
         void fetchPrompts({ pageSize: 12 }, token)
             .then((data) => setPromptShowcase(data.items))
-            .catch((error) => message.error(error instanceof Error ? error.message : "???????"));
+            .catch((error) => message.error(error instanceof Error ? error.message : "加载设置失败"));
     }, [isUserReady, message, token]);
 
     return (

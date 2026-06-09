@@ -6,6 +6,7 @@ import { persist } from "zustand/middleware";
 
 import { apiGet } from "@/services/api/request";
 import type { AdminPublicSettings } from "@/services/api/admin";
+import { useUserStore } from "@/stores/use-user-store";
 
 export type LocalModelChannel = {
     id: string;
@@ -137,8 +138,8 @@ type ConfigStore = {
     clearPromptContinue: () => void;
 };
 
-function resolveEffectiveConfig(config: AiConfig, modelChannel: AdminPublicSettings["modelChannel"] | null) {
-    const channelMode = modelChannel?.allowCustomChannel ? config.channelMode : "remote";
+function resolveEffectiveConfig(config: AiConfig, modelChannel: AdminPublicSettings["modelChannel"] | null, canUseCustomChannel = true) {
+    const channelMode = modelChannel?.allowCustomChannel && canUseCustomChannel ? config.channelMode : "remote";
     if (channelMode === "local" || !modelChannel) return { ...normalizeLocalConfig(config), channelMode };
     const models = modelChannel.availableModels;
     const textModels = filterModelsByCapability(models, "text");
@@ -183,19 +184,25 @@ function normalizeLocalConfig(config: AiConfig) {
 }
 
 export function normalizeLocalChannels(config: Partial<AiConfig>) {
+    const fallbackApiKey = typeof config.apiKey === "string" ? config.apiKey : "";
+    const fallbackModels = normalizeModelList(Array.isArray(config.models) ? config.models : []);
     const channels = Array.isArray(config.localChannels) ? config.localChannels : [];
-    const normalized = channels.map((channel, index) => ({
-        id: channel.id || `local-${index + 1}`,
-        name: typeof channel.name === "string" ? channel.name : `???? ${index + 1}`,
-        baseUrl: FIXED_USER_API_BASE_URL,
-        apiKey: channel.apiKey || "",
-        models: Array.isArray(channel.models) ? channel.models.filter(Boolean) : [],
-    }));
+    const normalized = channels.map((channel, index) => {
+        const channelModels = normalizeModelList(Array.isArray(channel.models) ? channel.models : []);
+        return {
+            id: channel.id || (index === 0 ? "local-default" : `local-${index + 1}`),
+            name: typeof channel.name === "string" && channel.name.trim() ? channel.name : index === 0 ? "User API Key" : `Local Channel ${index + 1}`,
+            baseUrl: FIXED_USER_API_BASE_URL,
+            apiKey: index === 0 ? fallbackApiKey || channel.apiKey || "" : channel.apiKey || "",
+            models: index === 0 ? normalizeModelList([...channelModels, ...fallbackModels]) : channelModels,
+        };
+    });
     if (!normalized.length) {
-        normalized.push({ id: "local-default", name: "User API Key", baseUrl: FIXED_USER_API_BASE_URL, apiKey: config.apiKey || "", models: Array.isArray(config.models) ? config.models.filter(Boolean) : [] });
+        normalized.push({ id: "local-default", name: "User API Key", baseUrl: FIXED_USER_API_BASE_URL, apiKey: fallbackApiKey, models: fallbackModels });
     }
     return normalized;
 }
+
 
 function validChannelId(channelId: string, channels: AdminPublicSettings["modelChannel"]["channels"], model: string) {
     return channels.some((channel) => channel.id === channelId && channel.models.includes(model)) ? channelId : "";
@@ -351,7 +358,8 @@ function normalizeModelList(models: string[]) {
 export function useEffectiveConfig() {
     const config = useConfigStore((state) => state.config);
     const modelChannel = useConfigStore((state) => state.publicSettings?.modelChannel || null);
-    return useMemo(() => resolveEffectiveConfig(config, modelChannel), [config, modelChannel]);
+    const canUseCustomChannel = useUserStore((state) => state.user?.canUseCustomChannel === true);
+    return useMemo(() => resolveEffectiveConfig(config, modelChannel, canUseCustomChannel), [config, modelChannel, canUseCustomChannel]);
 }
 
 export function channelIdForActiveModel(config: AiConfig) {

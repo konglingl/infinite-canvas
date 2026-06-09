@@ -3,7 +3,7 @@
 import { CopyOutlined, DeleteOutlined, EditOutlined, ExportOutlined, EyeOutlined, PlusOutlined, ReloadOutlined, SearchOutlined, SyncOutlined } from "@ant-design/icons";
 import { ProTable, type ProColumns } from "@ant-design/pro-components";
 import { Button, Card, Col, Flex, Form, Image, Input, Modal, Row, Select, Space, Table, Tag, Tooltip, Typography } from "antd";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { useCopyText } from "@/hooks/use-copy-text";
 import type { Prompt } from "@/services/api/prompts";
@@ -37,6 +37,7 @@ export default function AdminPromptsPage() {
     const copyText = useCopyText();
     const [form] = Form.useForm<Partial<Prompt> & { tagText?: string }>();
     const [keywordText, setKeywordText] = useState(keyword);
+    const keywordComposingRef = useRef(false);
     const [editingPrompt, setEditingPrompt] = useState<Partial<Prompt> | null>(null);
     const [detailPrompt, setDetailPrompt] = useState<Prompt | null>(null);
     const [deletingPrompt, setDeletingPrompt] = useState<Prompt | null>(null);
@@ -53,6 +54,11 @@ export default function AdminPromptsPage() {
     }, [editingPrompt, form]);
 
     useEffect(() => setKeywordText(keyword), [keyword]);
+
+    const submitKeywordSearch = (value = keywordText) => {
+        if (keywordComposingRef.current) return;
+        searchPrompts(value);
+    };
 
     const savePrompt = async () => {
         const value = await form.validateFields();
@@ -138,7 +144,21 @@ export default function AdminPromptsPage() {
                         <Row gutter={16} align="bottom">
                             <Col flex="360px">
                                 <Form.Item label="关键词">
-                                    <Input.Search value={keywordText} placeholder="搜索标题或提示词" allowClear enterButton={<SearchOutlined />} onSearch={() => searchPrompts(keywordText)} onChange={(event) => setKeywordText(event.target.value)} />
+                                    <Input.Search
+                                        value={keywordText}
+                                        placeholder="搜索提示词或分类"
+                                        allowClear
+                                        enterButton={<SearchOutlined />}
+                                        onCompositionStart={() => {
+                                            keywordComposingRef.current = true;
+                                        }}
+                                        onCompositionEnd={(event) => {
+                                            keywordComposingRef.current = false;
+                                            setKeywordText(event.currentTarget.value);
+                                        }}
+                                        onSearch={(value) => submitKeywordSearch(value)}
+                                        onChange={(event) => setKeywordText(event.target.value)}
+                                    />
                                 </Form.Item>
                             </Col>
                             <Col flex="220px">
@@ -162,7 +182,7 @@ export default function AdminPromptsPage() {
                                         >
                                             重置
                                         </Button>
-                                        <Button type="primary" icon={<ReloadOutlined />} onClick={() => searchPrompts(keywordText)}>
+                                        <Button type="primary" icon={<ReloadOutlined />} onClick={() => submitKeywordSearch(keywordText)}>
                                             查询
                                         </Button>
                                     </Space>

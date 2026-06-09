@@ -7,6 +7,7 @@ import { Button, Segmented } from "antd";
 import { ChannelBillingCost, ChannelBillingHint } from "@/components/channel-billing-hint";
 import { ModelPicker } from "@/components/model-picker";
 import { defaultConfig, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
+import { useUserStore } from "@/stores/use-user-store";
 import { requestCreditCost } from "@/constant/credits";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
@@ -28,7 +29,9 @@ export function CanvasConfigNodePanel({ node, isRunning, inputSummary, onConfigC
     const globalConfig = useEffectiveConfig();
     const modelCosts = useConfigStore((state) => state.publicSettings?.modelChannel.modelCosts);
     const updateConfig = useConfigStore((state) => state.updateConfig);
-    const allowCustomChannel = useConfigStore((state) => state.publicSettings?.modelChannel.allowCustomChannel === true);
+    const publicAllowsCustomChannel = useConfigStore((state) => state.publicSettings?.modelChannel.allowCustomChannel === true);
+    const canUseCustomChannel = useUserStore((state) => state.user?.canUseCustomChannel === true);
+    const allowCustomChannel = publicAllowsCustomChannel && canUseCustomChannel;
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const mode = node.metadata?.generationMode || "image";

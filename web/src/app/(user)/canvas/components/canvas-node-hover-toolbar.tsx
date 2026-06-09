@@ -150,6 +150,11 @@ export function CanvasNodeHoverToolbar({
         ...(hasImage ? imageTools.map((tool) => ({ id: tool.id, title: tool.title, label: tool.label, icon: tool.icon, active: tool.active, onClick: tool.onClick })) : []),
     ];
     const toolbarTools = hasImage ? [...baseToolbarTools, ...nodeToolbarTools].filter((tool) => quickImageToolIdSet.has(tool.id as ImageQuickToolId)) : [...baseToolbarTools, ...nodeToolbarTools];
+    const moreTool: ToolbarTool = { id: "more", title: "配置快捷工具", label: "更多", icon: <Ellipsis className="size-4" />, active: imageToolSettingsOpen, onClick: openImageToolSettings };
+    const toolbarActionTools = hasImage ? [...toolbarTools, moreTool] : toolbarTools;
+    const shouldSplitToolbarRows = toolbarActionTools.length > 6;
+    const toolbarFirstRowCount = Math.ceil(toolbarActionTools.length / 2);
+    const toolbarRows = shouldSplitToolbarRows ? [toolbarActionTools.slice(0, toolbarFirstRowCount), toolbarActionTools.slice(toolbarFirstRowCount)] : [toolbarActionTools];
     const selectableImageToolbarTools = [...baseToolbarTools, ...nodeToolbarTools].filter((tool) => tool.id !== "retry") as ImageToolbarSettingsTool[];
 
     const closeImageToolSettings = () => {
@@ -177,8 +182,10 @@ export function CanvasNodeHoverToolbar({
     return (
         <>
             <div
-                className="absolute z-[70] flex h-12 -translate-x-1/2 -translate-y-full items-center overflow-visible rounded-[18px] border border-black/10 bg-white text-[15px] text-[#242529] shadow-[0_8px_28px_rgba(15,23,42,.12)]"
+                className={`absolute z-[70] flex -translate-x-1/2 -translate-y-full flex-col items-center overflow-visible rounded-[18px] border border-black/10 bg-white text-[15px] text-[#242529] shadow-[0_8px_28px_rgba(15,23,42,.12)] ${shouldSplitToolbarRows ? "gap-0.5 py-1" : "h-12"}`}
                 style={{ left, top }}
+                data-toolbar-split-threshold={6}
+                data-toolbar-split-rows={shouldSplitToolbarRows ? "true" : "false"}
                 onMouseEnter={() => onKeep(node.id)}
                 onMouseLeave={() => {
                     if (!imageToolSettingsOpen) onLeave();
@@ -186,10 +193,13 @@ export function CanvasNodeHoverToolbar({
                 onMouseDown={(event) => event.stopPropagation()}
                 onPointerDown={(event) => event.stopPropagation()}
             >
-                {toolbarTools.map((tool) => (
-                    <ToolbarAction key={tool.id} {...tool} showLabel={showImageToolLabels} />
+                {toolbarRows.map((row, rowIndex) => (
+                    <div key={rowIndex} className="flex items-center justify-center">
+                        {row.map((tool) => (
+                            <ToolbarAction key={tool.id} {...tool} showLabel={showImageToolLabels} compact={shouldSplitToolbarRows} />
+                        ))}
+                    </div>
                 ))}
-                {hasImage ? <ToolbarAction id="more" title="配置快捷工具" label="更多" icon={<Ellipsis className="size-4" />} active={imageToolSettingsOpen} onClick={openImageToolSettings} showLabel={showImageToolLabels} /> : null}
             </div>
             {hasImage ? (
                 <ImageToolSettingsModal
@@ -277,12 +287,15 @@ export function CanvasNodeInfoModal({ node, open, onClose }: { node: CanvasNodeD
     );
 }
 
-function ToolbarAction({ title, label, icon, onClick, showLabel, active = false, danger = false }: ToolbarTool & { showLabel: boolean }) {
+function ToolbarAction({ title, label, icon, onClick, showLabel, compact = false, active = false, danger = false }: ToolbarTool & { showLabel: boolean; compact?: boolean }) {
     const hasText = showLabel && Boolean(label);
+    const buttonHeightClass = compact ? "h-10" : "h-12";
+    const innerHeightClass = compact ? "h-8" : "h-9";
+    const innerSpacingClass = hasText ? (compact ? "gap-1.5 px-2" : "gap-2 px-2.5") : compact ? "justify-center px-1.5" : "justify-center px-2";
     return (
         <Tooltip title={title} placement="top" mouseEnterDelay={0.2} color="#ffffff" styles={{ body: { color: "#242529", boxShadow: "0 8px 24px rgba(15,23,42,.16)", fontSize: 13, fontWeight: 500 } }}>
-            <button type="button" className={`group relative flex h-12 items-center whitespace-nowrap px-1.5 ${danger ? "text-[#ef4444]" : ""}`} onClick={onClick} aria-label={title}>
-                <span className={`flex h-9 items-center ${hasText ? "gap-2 px-2.5" : "justify-center px-2"} rounded-lg transition group-hover:bg-[#f0f0f1] ${active ? "bg-[#eeeeef]" : ""}`}>
+            <button type="button" className={`group relative flex ${buttonHeightClass} items-center whitespace-nowrap px-1.5 ${danger ? "text-[#ef4444]" : ""}`} onClick={onClick} aria-label={title}>
+                <span className={`flex ${innerHeightClass} items-center ${innerSpacingClass} rounded-lg transition group-hover:bg-[#f0f0f1] ${active ? "bg-[#eeeeef]" : ""}`}>
                     {icon}
                     {hasText ? <span>{label}</span> : null}
                 </span>

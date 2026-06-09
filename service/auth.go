@@ -1,6 +1,7 @@
 package service
 
 import (
+	"crypto/rand"
 	"bytes"
 	"encoding/base64"
 	"encoding/json"
@@ -12,6 +13,7 @@ import (
 	"net/url"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/basketikun/infinite-canvas/config"
 	"github.com/basketikun/infinite-canvas/model"
@@ -34,12 +36,15 @@ type userExtra struct {
 
 func EnsureDefaultAdmin() error {
 	if strings.TrimSpace(config.Cfg.AdminUsername) == "" || strings.TrimSpace(config.Cfg.AdminPassword) == "" {
-		return nil
+		return EnsureUserInviteCodes()
 	}
 	WarnDefaultSecurityConfig()
 	hasAdmin, err := repository.HasAdmin()
-	if err != nil || hasAdmin {
+	if err != nil {
 		return err
+	}
+	if hasAdmin {
+		return EnsureUserInviteCodes()
 	}
 	hash, err := hashPassword(config.Cfg.AdminPassword)
 	if err != nil {
@@ -55,10 +60,45 @@ func EnsureDefaultAdmin() error {
 		CreatedAt: now(),
 		UpdatedAt: now(),
 	})
-	return err
+	if err != nil {
+		return err
+	}
+	return EnsureUserInviteCodes()
 }
 
-func Register(username string, password string) (model.AuthSession, error) {
+func EnsureUserInviteCodes() error {
+	page := 1
+	for {
+		users, total, err := repository.ListUsers(model.Query{Page: page, PageSize: model.MaxPageSize})
+		if err != nil {
+			return err
+		}
+		for i := range users {
+			changed := false
+			if users[i].Status == "" {
+				users[i].Status = model.UserStatusActive
+				changed = true
+			}
+			if secureCodeCompactLength(users[i].AffCode) < 20 {
+				users[i].AffCode = newAffCode()
+				changed = true
+			}
+			if changed {
+				users[i].UpdatedAt = now()
+				if _, err := repository.SaveUser(users[i]); err != nil {
+					return err
+				}
+			}
+		}
+		if int64(page*model.MaxPageSize) >= total || len(users) == 0 {
+			break
+		}
+		page++
+	}
+	return nil
+}
+
+func Register(username string, password string, inviteCode string) (model.AuthSession, error) {
 	settings, err := repository.GetSettings()
 	if err != nil {
 		return model.AuthSession{}, err
@@ -74,6 +114,17 @@ func Register(username string, password string) (model.AuthSession, error) {
 	if username == "" || password == "" {
 		return model.AuthSession{}, safeMessageError{message: "用户名和密码不能为空"}
 	}
+	var inviter model.User
+	if normalizedSettings.Public.Auth.RequireInviteCode != nil && *normalizedSettings.Public.Auth.RequireInviteCode {
+		var ok bool
+		inviter, ok, err = repository.GetUserByAffCode(normalizeInviteCode(inviteCode))
+		if err != nil {
+			return model.AuthSession{}, err
+		}
+		if !ok || inviter.Status == model.UserStatusBan {
+			return model.AuthSession{}, safeMessageError{message: "邀请码无效"}
+		}
+	}
 	if _, ok, err := repository.GetUserByUsername(username); err != nil || ok {
 		if err != nil {
 			return model.AuthSession{}, err
@@ -84,18 +135,25 @@ func Register(username string, password string) (model.AuthSession, error) {
 	if err != nil {
 		return model.AuthSession{}, err
 	}
+	nowText := now()
 	user, err := repository.SaveUser(model.User{
 		ID:        newID("user"),
 		Username:  username,
 		Password:  hash,
 		Role:      model.UserRoleUser,
 		AffCode:   newAffCode(),
+		InviterID: inviter.ID,
 		Status:    model.UserStatusActive,
-		CreatedAt: now(),
-		UpdatedAt: now(),
+		CreatedAt: nowText,
+		UpdatedAt: nowText,
 	})
 	if err != nil {
 		return model.AuthSession{}, err
+	}
+	if inviter.ID != "" {
+		if err := repository.IncrementUserAffCount(inviter.ID, nowText); err != nil {
+			return model.AuthSession{}, err
+		}
 	}
 	return newSession(user)
 }
@@ -511,12 +569,139 @@ func DeleteCreditLog(id string) error {
 	return repository.DeleteCreditLog(id)
 }
 
+func ListRedeemCodes(q model.Query) (model.RedeemCodeList, error) {
+	codes, total, err := repository.ListRedeemCodes(q)
+	if err != nil {
+		return model.RedeemCodeList{}, err
+	}
+	return model.RedeemCodeList{Items: codes, Total: int(total)}, nil
+}
+
+func SaveRedeemCode(code model.RedeemCode) (model.RedeemCode, error) {
+	code.Code = normalizeRedeemCode(code.Code)
+	if code.Code == "" {
+		generated, err := uniqueRedeemCode()
+		if err != nil {
+			return model.RedeemCode{}, err
+		}
+		code.Code = generated
+	}
+	if code.Credits <= 0 {
+		return model.RedeemCode{}, safeMessageError{message: "兑换算力点必须大于 0"}
+	}
+	if code.TotalLimit < 0 {
+		return model.RedeemCode{}, safeMessageError{message: "可兑换次数不能小于 0"}
+	}
+	var old model.RedeemCode
+	if code.ID == "" {
+		code.ID = newID("redeem")
+		code.CreatedAt = now()
+	} else {
+		var ok bool
+		var err error
+		old, ok, err = repository.GetRedeemCodeByID(code.ID)
+		if err != nil {
+			return model.RedeemCode{}, err
+		}
+		if !ok {
+			return model.RedeemCode{}, safeMessageError{message: "兑换码不存在"}
+		}
+		code.CreatedAt = old.CreatedAt
+		code.UsedCount = old.UsedCount
+	}
+	if code.TotalLimit > 0 && code.TotalLimit < code.UsedCount {
+		return model.RedeemCode{}, safeMessageError{message: "可兑换次数不能小于已使用次数"}
+	}
+	expiresAt, err := normalizeRedeemExpiresAt(code.ExpiresAt)
+	if err != nil {
+		return model.RedeemCode{}, err
+	}
+	code.ExpiresAt = expiresAt
+	code.Remark = strings.TrimSpace(code.Remark)
+	code.UpdatedAt = now()
+	return repository.SaveRedeemCode(code)
+}
+
+func DeleteRedeemCode(id string) error {
+	return repository.DeleteRedeemCode(id)
+}
+
+func RedeemCode(userID string, codeText string) (model.RedeemCodeResult, error) {
+	codeText = normalizeRedeemCode(codeText)
+	if codeText == "" {
+		return model.RedeemCodeResult{}, safeMessageError{message: "请输入兑换码"}
+	}
+	code, ok, err := repository.GetRedeemCodeByCode(codeText)
+	if err != nil {
+		return model.RedeemCodeResult{}, err
+	}
+	if !ok {
+		return model.RedeemCodeResult{}, safeMessageError{message: "兑换码不存在"}
+	}
+	if code.ExpiresAt != "" {
+		expiresAt, err := time.Parse(time.RFC3339, code.ExpiresAt)
+		if err != nil {
+			return model.RedeemCodeResult{}, err
+		}
+		if time.Now().After(expiresAt) {
+			return model.RedeemCodeResult{}, safeMessageError{message: "兑换码已过期"}
+		}
+	}
+	nowText := now()
+	user, usedCode, err := repository.UseRedeemCode(userID, codeText, nowText, newID("redeem-use"))
+	if err != nil {
+		switch err {
+		case repository.ErrRedeemCodeNotFound:
+			return model.RedeemCodeResult{}, safeMessageError{message: "兑换码不存在"}
+		case repository.ErrRedeemCodeDisabled:
+			return model.RedeemCodeResult{}, safeMessageError{message: "兑换码已停用"}
+		case repository.ErrRedeemCodeExhausted:
+			return model.RedeemCodeResult{}, safeMessageError{message: "兑换码已被用完"}
+		case repository.ErrRedeemCodeAlreadyUsed:
+			return model.RedeemCodeResult{}, safeMessageError{message: "你已经兑换过这个兑换码"}
+		case repository.ErrRedeemCodeInvalidCredits:
+			return model.RedeemCodeResult{}, safeMessageError{message: "兑换码配置无效"}
+		case repository.ErrRedeemCodeUserNotFound:
+			return model.RedeemCodeResult{}, safeMessageError{message: "用户不存在"}
+		default:
+			return model.RedeemCodeResult{}, err
+		}
+	}
+	extra, _ := json.Marshal(map[string]string{"codeId": usedCode.ID, "code": usedCode.Code})
+	if _, err := repository.SaveCreditLog(model.CreditLog{
+		ID:        newID("credit"),
+		UserID:    user.ID,
+		Type:      model.CreditLogTypeRedeem,
+		Amount:    usedCode.Credits,
+		Balance:   user.Credits,
+		RelatedID: usedCode.ID,
+		Remark:    "兑换码充值 " + usedCode.Code,
+		Extra:     string(extra),
+		CreatedAt: nowText,
+	}); err != nil {
+		log.Printf("save redeem credit log failed: user=%s code=%s err=%v", user.ID, usedCode.Code, err)
+	}
+	user.Password = ""
+	return model.RedeemCodeResult{Code: usedCode.Code, Credits: usedCode.Credits, Balance: user.Credits, User: model.PublicUser(user)}, nil
+}
+
 func DeleteUser(id string) error {
 	return repository.DeleteUser(id)
 }
 
 func GuestUser() model.AuthUser {
 	return model.AuthUser{ID: "", Username: "guest", Role: model.UserRoleGuest}
+}
+
+func CanUserUseCustomChannel(user model.AuthUser) bool {
+	return user.ID != "" && user.CanUseCustomChannel
+}
+
+func EnsureCustomChannelAllowed(user model.AuthUser) error {
+	if CanUserUseCustomChannel(user) {
+		return nil
+	}
+	return safeMessageError{message: "当前账号不允许使用自定义 API Key 渠道"}
 }
 
 func newSession(user model.User) (model.AuthSession, error) {
@@ -559,7 +744,93 @@ func newID(prefix string) string {
 }
 
 func newAffCode() string {
-	return strings.ToUpper(strings.ReplaceAll(uuid.NewString()[:8], "-", ""))
+	return groupedSecureCode("INV", 5, 5)
+}
+
+func newRedeemCode() string {
+	return groupedSecureCode("STC", 6, 5)
+}
+
+const secureCodeAlphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789#$%*+-=@"
+
+func groupedSecureCode(prefix string, groups int, groupSize int) string {
+	parts := make([]string, 0, groups+1)
+	if strings.TrimSpace(prefix) != "" {
+		parts = append(parts, strings.ToUpper(strings.TrimSpace(prefix)))
+	}
+	for i := 0; i < groups; i++ {
+		parts = append(parts, secureCodePart(groupSize))
+	}
+	return strings.Join(parts, "-")
+}
+
+func secureCodePart(length int) string {
+	if length <= 0 {
+		return ""
+	}
+	buf := make([]byte, length)
+	random := make([]byte, length)
+	if _, err := rand.Read(random); err != nil {
+		randomText := strings.ToUpper(strings.ReplaceAll(uuid.NewString(), "-", ""))
+		for i := range buf {
+			buf[i] = randomText[i%len(randomText)]
+		}
+		return string(buf)
+	}
+	for i, value := range random {
+		buf[i] = secureCodeAlphabet[int(value)%len(secureCodeAlphabet)]
+	}
+	return string(buf)
+}
+
+func uniqueRedeemCode() (string, error) {
+	for range 10 {
+		code := newRedeemCode()
+		_, ok, err := repository.GetRedeemCodeByCode(code)
+		if err != nil {
+			return "", err
+		}
+		if !ok {
+			return code, nil
+		}
+	}
+	return "", safeMessageError{message: "生成兑换码失败，请重试"}
+}
+
+func normalizeRedeemCode(code string) string {
+	return strings.ToUpper(strings.TrimSpace(code))
+}
+
+func secureCodeCompactLength(code string) int {
+	count := 0
+	for _, ch := range strings.TrimSpace(code) {
+		if ch != '-' && ch != '_' && !unicode.IsSpace(ch) {
+			count++
+		}
+	}
+	return count
+}
+
+func normalizeInviteCode(code string) string {
+	return strings.ToUpper(strings.TrimSpace(code))
+}
+
+func normalizeRedeemExpiresAt(value string) (string, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "", nil
+	}
+	layouts := []string{time.RFC3339, "2006-01-02 15:04:05", "2006-01-02"}
+	for _, layout := range layouts {
+		parsed, err := time.ParseInLocation(layout, value, time.Local)
+		if err == nil {
+			if layout == "2006-01-02" {
+				parsed = parsed.Add(24*time.Hour - time.Second)
+			}
+			return parsed.Format(time.RFC3339), nil
+		}
+	}
+	return "", safeMessageError{message: "过期时间格式不正确，请使用 2026-12-31 23:59:59"}
 }
 
 func normalizeUserDefaults(user *model.User) {

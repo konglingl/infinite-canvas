@@ -21,6 +21,8 @@ description: 当前后端主要数据表与字段说明
 
 - `users`
 - `credit_logs`
+- `redeem_codes`
+- `redeem_code_uses`
 - `prompts`
 - `assets`
 - `settings`
@@ -52,6 +54,37 @@ description: 当前后端主要数据表与字段说明
 | `extra` | json | 扩展信息，第三方资料按平台命名空间保存，如 `linuxDo` |
 | `created_at` | string | 创建时间 |
 | `updated_at` | string | 更新时间 |
+
+
+### redeem_codes
+
+算力点兑换码表。管理员在后台创建，用户在前台兑换后增加算力点。
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `id` | string | 主键 |
+| `code` | string | 兑换码，唯一索引 |
+| `credits` | number | 每次兑换增加的算力点 |
+| `total_limit` | number | 总可兑换次数，0 表示不限 |
+| `used_count` | number | 已兑换次数 |
+| `enabled` | bool | 是否启用 |
+| `expires_at` | string | 过期时间，空表示长期有效 |
+| `remark` | string | 管理员备注 |
+| `created_at` | string | 创建时间 |
+| `updated_at` | string | 更新时间 |
+
+### redeem_code_uses
+
+兑换码使用记录表。用于限制同一用户对同一个兑换码只能兑换一次。
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `id` | string | 主键 |
+| `code_id` | string | 兑换码 ID，与 `user_id` 组成唯一索引 |
+| `code` | string | 兑换时的兑换码文本 |
+| `user_id` | string | 兑换用户 ID，与 `code_id` 组成唯一索引 |
+| `credits` | number | 本次兑换获得的算力点 |
+| `created_at` | string | 兑换时间 |
 
 ### prompts
 

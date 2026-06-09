@@ -4,12 +4,19 @@ const MaxPageSize = 500
 
 // Query 列表筛选和分页参数。
 type Query struct {
-	Keyword  string
-	Tags     []string
-	Category string
-	Type     string
-	Page     int
-	PageSize int
+	Keyword   string
+	Tags      []string
+	Category  string
+	Type      string
+	UserID    string
+	Model     string
+	ChannelID string
+	Method    string
+	Status    string
+	StartAt   string
+	EndAt     string
+	Page      int
+	PageSize  int
 }
 
 func (q *Query) Normalize() {

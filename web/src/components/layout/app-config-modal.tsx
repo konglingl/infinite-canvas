@@ -8,6 +8,7 @@ import { ModelPicker } from "@/components/model-picker";
 import { fetchImageModels } from "@/services/api/image";
 import { audioFormatOptions, audioVoiceOptions, normalizeAudioSpeedValue } from "@/lib/audio-generation";
 import { FIXED_USER_API_BASE_URL, filterModelsByCapability, useConfigStore, useEffectiveConfig, type AiConfig, type ModelCapability } from "@/stores/use-config-store";
+import { useUserStore } from "@/stores/use-user-store";
 
 type ModelGroup = {
     capability: ModelCapability;
@@ -16,6 +17,8 @@ type ModelGroup = {
     defaultLabel: string;
     optionsLabel: string;
 };
+
+const CANVAS_IMAGE_MAX_COUNT = 30;
 
 const modelGroups: ModelGroup[] = [
     { capability: "image", modelKey: "imageModel", modelsKey: "imageModels", defaultLabel: "默认生图模型", optionsLabel: "生图模型可选项" },
@@ -36,7 +39,8 @@ export function AppConfigModal() {
     const publicSettings = useConfigStore((state) => state.publicSettings);
     const effectiveConfig = useEffectiveConfig();
     const modelChannel = publicSettings?.modelChannel;
-    const allowCustomChannel = modelChannel?.allowCustomChannel === true;
+    const canUseCustomChannel = useUserStore((state) => state.user?.canUseCustomChannel === true);
+    const allowCustomChannel = modelChannel?.allowCustomChannel === true && canUseCustomChannel;
     const effectiveMode = allowCustomChannel ? config.channelMode : "remote";
     const modelConfig = effectiveMode === "remote" ? effectiveConfig : config;
     const modelOptions = config.models.map((model) => ({ label: model, value: model }));
@@ -94,8 +98,8 @@ export function AppConfigModal() {
         <Modal
             title={
                 <div>
-                    <div className="text-lg font-semibold">配置与用户偏好</div>
-                    <div className="mt-1 text-xs font-normal text-stone-500">模型、渠道和画布默认行为</div>
+                    <div className="text-lg font-semibold">AI 配置</div>
+                    <div className="mt-1 text-xs font-normal text-stone-500">API Key、渠道、模型和默认生成参数</div>
                 </div>
             }
             open={isConfigOpen}
@@ -190,7 +194,7 @@ export function AppConfigModal() {
                             <Input
                                 type="number"
                                 min={1}
-                                max={15}
+                                max={CANVAS_IMAGE_MAX_COUNT}
                                 value={config.canvasImageCount}
                                 onChange={(event) => updateConfig("canvasImageCount", event.target.value)}
                                 onBlur={(event) => updateConfig("canvasImageCount", normalizeImageCount(event.target.value))}
@@ -229,7 +233,7 @@ export function AppConfigModal() {
 }
 
 function normalizeImageCount(value: string) {
-    return String(Math.max(1, Math.min(15, Math.floor(Math.abs(Number(value)) || 3))));
+    return String(Math.max(1, Math.min(CANVAS_IMAGE_MAX_COUNT, Math.floor(Math.abs(Number(value)) || 3))));
 }
 
 function resolveNextCapabilityModels(current: string[], suggested: string[], allModels: string[]) {

@@ -1,7 +1,7 @@
 "use client";
 
 import { FolderPlus, Search } from "lucide-react";
-import { type UIEvent, useEffect, useState } from "react";
+import { type UIEvent, useEffect, useRef, useState } from "react";
 import { App, Button, Empty, Input, Spin, Tag } from "antd";
 
 import { PromptCard } from "@/components/prompts/prompt-card";
@@ -15,6 +15,8 @@ import { ALL_PROMPTS_OPTION, type Prompt } from "@/services/api/prompts";
 export default function PromptsPage() {
     const { message } = App.useApp();
     const [titleKeyword, setTitleKeyword] = useState("");
+    const [titleKeywordText, setTitleKeywordText] = useState("");
+    const titleKeywordComposingRef = useRef(false);
     const [selectedTags, setSelectedTags] = useState<string[]>([]);
     const [selectedCategory, setSelectedCategory] = useState(ALL_PROMPTS_OPTION);
     const [selectedPrompt, setSelectedPrompt] = useState<Prompt | null>(null);
@@ -27,6 +29,16 @@ export default function PromptsPage() {
             message.error(query.error instanceof Error ? query.error.message : "获取提示词失败");
         }
     }, [message, query.error, query.isError]);
+
+    const changeTitleKeywordText = (value: string) => {
+        setTitleKeywordText(value);
+        if (!titleKeywordComposingRef.current) setTitleKeyword(value);
+    };
+    const commitTitleKeywordText = (value: string) => {
+        titleKeywordComposingRef.current = false;
+        setTitleKeywordText(value);
+        setTitleKeyword(value);
+    };
 
     const toggleTag = (tag: string) => {
         if (tag === ALL_PROMPTS_OPTION) return setSelectedTags([]);
@@ -64,7 +76,18 @@ export default function PromptsPage() {
                     {!query.isLoading ? (
                         <>
                             <div className="mx-auto mt-8 w-full max-w-2xl">
-                                <Input size="large" className="w-full" prefix={<Search className="size-4 text-stone-400" />} value={titleKeyword} placeholder="按标题查询" onChange={(event) => setTitleKeyword(event.target.value)} />
+                                <Input
+                                    size="large"
+                                    className="w-full"
+                                    prefix={<Search className="size-4 text-stone-400" />}
+                                    value={titleKeywordText}
+                                    placeholder="搜索提示词"
+                                    onCompositionStart={() => {
+                                        titleKeywordComposingRef.current = true;
+                                    }}
+                                    onCompositionEnd={(event) => commitTitleKeywordText(event.currentTarget.value)}
+                                    onChange={(event) => changeTitleKeywordText(event.target.value)}
+                                />
                             </div>
                             <div className="mx-auto mt-6 grid max-w-6xl gap-3 text-left">
                                 <div className="grid gap-2 sm:grid-cols-[56px_minmax(0,1fr)] sm:items-start">

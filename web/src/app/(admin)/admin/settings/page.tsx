@@ -36,7 +36,7 @@ const emptySettings: AdminSettings = {
             systemPrompt: "",
             allowCustomChannel: true,
         },
-        auth: { allowRegister: true, linuxDo: { enabled: false } },
+        auth: { allowRegister: true, requireInviteCode: false, linuxDo: { enabled: false } },
     },
     private: { channels: [], promptSync: { enabled: true, cron: "*/5 * * * *" }, auth: { linuxDo: { clientId: "", clientSecret: "" } } },
 };
@@ -444,12 +444,17 @@ export default function AdminSettingsPage() {
                                         </Form.Item>
                                     </Col>
                                     <Col span={24}>
-                                        <Form.Item name={["public", "modelChannel", "allowCustomChannel"]} label="是否允许用户自定义渠道" extra="开启后，前端可提供走后端渠道和用户自定义 baseUrl 直连两种模式" valuePropName="checked">
+                                        <Form.Item name={["public", "modelChannel", "allowCustomChannel"]} label="是否允许中转站账号使用自带 Key" extra="开启后，仅通过中转站账号密码登录的用户可看到自带 Key 渠道；本站注册用户只使用云端渠道" valuePropName="checked">
                                             <Switch />
                                         </Form.Item>
                                     </Col>
                                     <Col span={24}>
                                         <Form.Item name={["public", "auth", "allowRegister"]} label="是否允许用户注册" extra="关闭后隐藏注册入口，注册接口也会拒绝新用户创建" valuePropName="checked">
+                                            <Switch />
+                                        </Form.Item>
+                                    </Col>
+                                    <Col span={24}>
+                                        <Form.Item name={["public", "auth", "requireInviteCode"]} label="注册必须填写邀请码" extra="开启后，新用户注册必须填写已有用户的邀请码；关闭后可直接注册" valuePropName="checked">
                                             <Switch />
                                         </Form.Item>
                                     </Col>
@@ -842,6 +847,7 @@ function normalizePublicSetting(setting: Partial<AdminSettings["public"]> = {}):
         },
         auth: {
             allowRegister: setting.auth?.allowRegister !== false,
+            requireInviteCode: setting.auth?.requireInviteCode === true,
             linuxDo: {
                 enabled: setting.auth?.linuxDo?.enabled === true,
             },

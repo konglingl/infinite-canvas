@@ -22,6 +22,7 @@ import { requestVideoGeneration, storeGeneratedVideo } from "@/services/api/vide
 import { useAssetStore } from "@/stores/use-asset-store";
 import { requestCreditCost } from "@/constant/credits";
 import { useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
+import { useUserStore } from "@/stores/use-user-store";
 import { useThemeStore } from "@/stores/use-theme-store";
 import type { ReferenceImage } from "@/types/image";
 import type { ReferenceAudio, ReferenceVideo } from "@/types/media";
@@ -81,7 +82,9 @@ export default function VideoPage() {
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
     const addAsset = useAssetStore((state) => state.addAsset);
     const modelCosts = useConfigStore((state) => state.publicSettings?.modelChannel.modelCosts);
-    const allowCustomChannel = useConfigStore((state) => state.publicSettings?.modelChannel.allowCustomChannel === true);
+    const publicAllowsCustomChannel = useConfigStore((state) => state.publicSettings?.modelChannel.allowCustomChannel === true);
+    const canUseCustomChannel = useUserStore((state) => state.user?.canUseCustomChannel === true);
+    const allowCustomChannel = publicAllowsCustomChannel && canUseCustomChannel;
     const [prompt, setPrompt] = useState("");
     const [references, setReferences] = useState<ReferenceImage[]>([]);
     const [videoReferences, setVideoReferences] = useState<ReferenceVideo[]>([]);

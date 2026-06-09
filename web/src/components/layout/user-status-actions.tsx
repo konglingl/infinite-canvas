@@ -1,8 +1,8 @@
 "use client";
 
-import type { CSSProperties, RefObject } from "react";
+import { useState, type CSSProperties, type RefObject } from "react";
 import { Avatar, Dropdown, Tooltip } from "antd";
-import { BookOpen, Keyboard, LogOut, Settings2, Shield } from "lucide-react";
+import { BookOpen, Gift, Keyboard, LogOut, Settings2, Shield, SlidersHorizontal } from "lucide-react";
 import type { ItemType } from "antd/es/menu/interface";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
@@ -10,6 +10,8 @@ import { usePathname, useRouter } from "next/navigation";
 import { AnimatedThemeToggler } from "@/components/ui/animated-theme-toggler";
 import { GitHubLink } from "@/components/layout/github-link";
 import { VersionReleaseModal } from "@/components/layout/version-release-modal";
+import { LocalDataSettingsModal } from "@/components/layout/local-data-settings-modal";
+import { RedeemCodeModal } from "@/components/layout/redeem-code-modal";
 import { CreditSymbol } from "@/constant/credits";
 import { DOCS_URL } from "@/constant/env";
 import { cn } from "@/lib/utils";
@@ -37,8 +39,11 @@ export function UserStatusActions({ showConfig = true, variant = "default", onOp
     const isReady = useUserStore((state) => state.isReady);
     const logout = useUserStore((state) => state.clearSession);
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
+    const [localDataSettingsOpen, setLocalDataSettingsOpen] = useState(false);
+    const [redeemOpen, setRedeemOpen] = useState(false);
     const canvasTheme = canvasThemes[theme];
     const userName = user?.displayName || user?.username || "";
+    const isAdmin = user?.role === "admin";
     const credits = user?.credits ?? 0;
     const avatarUrl = user?.avatarUrl?.trim();
     const avatarText = (userName.trim()[0] || "U").toUpperCase();
@@ -55,25 +60,36 @@ export function UserStatusActions({ showConfig = true, variant = "default", onOp
     };
     const menuItems: ItemType[] = [
         { key: "user", disabled: true, label: <span className="font-medium text-current">{userName}</span> },
-        ...(user?.role === "admin" ? [{ key: "admin", icon: <Shield className="size-4" />, label: <Link href="/admin" target="_blank">管理后台</Link> }] : []),
+        ...(isAdmin ? [{ key: "admin", icon: <Shield className="size-4" />, label: <Link href="/admin" target="_blank">管理后台</Link> }] : []),
+        { key: "redeem", icon: <Gift className="size-4" />, label: "兑换算力点", onClick: () => { setRedeemOpen(true); onAccountOpenChange?.(false); } },
         ...(onOpenShortcuts ? [{ key: "shortcuts", icon: <Keyboard className="size-4" />, label: "快捷键", onClick: onOpenShortcuts }] : []),
         { type: "divider" },
         { key: "logout", icon: <LogOut className="size-4" />, label: "退出登录", onClick: handleLogout },
     ];
 
     return (
-        <div className="inline-flex shrink-0 items-center gap-1">
+        <>
+            <div className="inline-flex shrink-0 items-center gap-1">
             <a href={DOCS_URL} target="_blank" rel="noopener noreferrer" className={naturalIconClass} style={iconStyle} aria-label="文档" title="文档">
                 <BookOpen className="size-4" />
             </a>
             {showConfig ? (
-                <button type="button" className={naturalIconClass} style={iconStyle} onClick={() => openConfigDialog(false)} aria-label="配置" title="配置">
+                <button type="button" className={naturalIconClass} style={iconStyle} onClick={() => setLocalDataSettingsOpen(true)} aria-label="本地数据设置" title="本地数据设置">
                     <Settings2 className="size-4" />
                 </button>
             ) : null}
+            {showConfig ? (
+                <button type="button" className={naturalIconClass} style={iconStyle} onClick={() => openConfigDialog(false)} aria-label="AI 配置" title="AI 配置">
+                    <SlidersHorizontal className="size-4" />
+                </button>
+            ) : null}
             <AnimatedThemeToggler theme={theme} onThemeChange={setTheme} className={naturalIconClass} style={iconStyle} aria-label={theme === "dark" ? "切换到浅色主题" : "切换到深色主题"} title={theme === "dark" ? "切换到浅色主题" : "切换到深色主题"} />
-            <VersionReleaseModal style={versionStyle} />
-            <GitHubLink className={cn("bg-transparent hover:bg-transparent dark:hover:bg-transparent", gitHubClassName)} style={gitHubStyle} />
+            {isAdmin ? (
+                <>
+                    <VersionReleaseModal style={versionStyle} />
+                    <GitHubLink className={cn("bg-transparent hover:bg-transparent dark:hover:bg-transparent", gitHubClassName)} style={gitHubStyle} />
+                </>
+            ) : null}
             {variant === "canvas" && user ? (
                 <Tooltip title="当前算力点余额" placement="bottom">
                     <div className="flex h-8 shrink-0 items-center gap-1.5 px-1.5 text-xs font-medium tabular-nums opacity-75 transition hover:opacity-100" style={{ color: canvasTheme.node.text }}>
@@ -109,6 +125,9 @@ export function UserStatusActions({ showConfig = true, variant = "default", onOp
                     </Dropdown>
                 </div>
             ) : null}
-        </div>
+            </div>
+            {showConfig ? <LocalDataSettingsModal open={localDataSettingsOpen} onClose={() => setLocalDataSettingsOpen(false)} /> : null}
+            <RedeemCodeModal open={redeemOpen} onClose={() => setRedeemOpen(false)} />
+        </>
     );
 }

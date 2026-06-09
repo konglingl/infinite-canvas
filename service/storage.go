@@ -463,7 +463,7 @@ func DraftCreativeWorkflow(ctx context.Context, request WorkflowAgentDraftReques
 	if err != nil {
 		return WorkflowAgentDraftResponse{}, err
 	}
-	channel, err := workflowDraftChannel(request, modelName)
+	channel, err := workflowDraftChannel(user, request, modelName)
 	if err != nil {
 		return WorkflowAgentDraftResponse{}, err
 	}
@@ -561,8 +561,11 @@ func workflowDraftModel(modelName string) (string, error) {
 	return "", safeMessageError{message: "请先配置文本模型"}
 }
 
-func workflowDraftChannel(request WorkflowAgentDraftRequest, modelName string) (model.ModelChannel, error) {
+func workflowDraftChannel(user model.AuthUser, request WorkflowAgentDraftRequest, modelName string) (model.ModelChannel, error) {
 	if request.ChannelMode == "local" {
+		if err := EnsureCustomChannelAllowed(user); err != nil {
+			return model.ModelChannel{}, err
+		}
 		return FixedUserModelChannel(request.APIKey, modelName)
 	}
 	return SelectModelChannelForModel(modelName, request.ChannelID)

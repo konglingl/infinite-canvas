@@ -9,6 +9,7 @@ import { ImageGenerationPending } from "@/components/image-generation-pending";
 import { ChannelBillingCost, ChannelBillingHint } from "@/components/channel-billing-hint";
 import { ModelPicker } from "@/components/model-picker";
 import { useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
+import { useUserStore } from "@/stores/use-user-store";
 import { requestCreditCost } from "@/constant/credits";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { nanoid } from "nanoid";
@@ -46,7 +47,9 @@ export function CanvasAssistantPanel({ nodes, selectedNodeIds, sessions, activeS
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const effectiveConfig = useEffectiveConfig();
     const modelCosts = useConfigStore((state) => state.publicSettings?.modelChannel.modelCosts);
-    const allowCustomChannel = useConfigStore((state) => state.publicSettings?.modelChannel.allowCustomChannel === true);
+    const publicAllowsCustomChannel = useConfigStore((state) => state.publicSettings?.modelChannel.allowCustomChannel === true);
+    const canUseCustomChannel = useUserStore((state) => state.user?.canUseCustomChannel === true);
+    const allowCustomChannel = publicAllowsCustomChannel && canUseCustomChannel;
     const cleanupImages = useAssetStore((state) => state.cleanupImages);
     const updateConfig = useConfigStore((state) => state.updateConfig);
     const isAiConfigReady = useConfigStore((state) => state.isAiConfigReady);
@@ -226,14 +229,17 @@ export function CanvasAssistantPanel({ nodes, selectedNodeIds, sessions, activeS
 
     return (
         <motion.div
-            className="flex shrink-0"
+            className="flex shrink-0 select-text"
             initial={{ width: 0, opacity: 0 }}
             animate={{ width: closing ? 0 : width + 1, opacity: closing ? 0 : 1 }}
             transition={{ duration: resizing ? 0 : PANEL_MOTION_SECONDS, ease: [0.22, 1, 0.36, 1] }}
             style={{ overflow: "clip", pointerEvents: closing ? "none" : undefined }}
+            data-canvas-no-zoom="true"
+            onMouseDown={(event) => event.stopPropagation()}
+            onPointerDown={(event) => event.stopPropagation()}
         >
             <motion.aside
-                className="relative flex shrink-0 flex-col border-l"
+                className="relative flex shrink-0 select-text flex-col border-l"
                 initial={{ x: 48 }}
                 animate={{ x: closing ? 28 : 0 }}
                 transition={{ duration: resizing ? 0 : PANEL_MOTION_SECONDS, ease: [0.22, 1, 0.36, 1] }}
@@ -243,7 +249,7 @@ export function CanvasAssistantPanel({ nodes, selectedNodeIds, sessions, activeS
                 <div className="flex items-center justify-between border-b px-4 py-3" style={{ borderColor: theme.node.stroke }}>
                     <div className="flex items-center gap-2 text-sm font-medium">
                         <Sparkles className="size-4" />
-                        {view === "history" ? "历史记录" : "画布助手(未开发)"}
+                        {view === "history" ? "历史记录" : "画布助手"}
                     </div>
                     <div className="flex items-center gap-1">
                         {view === "history" ? (
@@ -515,8 +521,8 @@ function AssistantMessages({
             {messages.map((message) => (
                 <div key={message.id} className={cn("flex flex-col gap-2", message.role === "user" ? "items-end" : "items-start")}>
                     <div
-                        className="max-w-[88%] whitespace-pre-wrap rounded-2xl px-3 py-2 text-sm leading-6"
-                        style={message.role === "user" ? { background: theme.toolbar.activeBg, color: theme.toolbar.activeText } : { background: theme.node.fill, color: theme.node.text }}
+                        className="max-w-[88%] cursor-text select-text whitespace-pre-wrap rounded-2xl px-3 py-2 text-sm leading-6"
+                        style={message.role === "user" ? { background: theme.toolbar.activeBg, color: theme.toolbar.activeText, userSelect: "text" } : { background: theme.node.fill, color: theme.node.text, userSelect: "text" }}
                     >
                         {message.role === "assistant" ? (
                             <div className="mb-1 flex items-center gap-1.5 text-xs opacity-60">

@@ -23,9 +23,10 @@ import (
 )
 
 const (
-	aiLogRequestTextLimit = 64 * 1024
-	aiLogErrorTextLimit   = 16 * 1024
-	aiLogScannerMax       = 16 * 1024 * 1024
+	aiLogRequestTextLimit  = 64 * 1024
+	aiLogResponseTextLimit = 128 * 1024
+	aiLogErrorTextLimit    = 16 * 1024
+	aiLogScannerMax        = 16 * 1024 * 1024
 	defaultAILogCron      = "0 3 * * *"
 	defaultAILogRetention = 14
 )
@@ -58,8 +59,12 @@ type AICallLogInput struct {
 }
 
 func SaveAICallLog(input AICallLogInput) {
-	responseBody := normalizeAICallResponseLog(input.ResponseBody, input.Error)
-	errorText := normalizeAICallErrorLog(input.Error, input.ResponseBody)
+	responseBody := ""
+	errorText := ""
+	if strings.TrimSpace(input.Error) != "" || input.Status == 0 || input.Status >= 400 {
+		errorText = normalizeAICallErrorLog(input.Error, input.ResponseBody)
+		responseBody = errorText
+	}
 	item := model.AICallLog{
 		ID:              uuid.NewString(),
 		UserID:          strings.TrimSpace(input.UserID),
@@ -72,8 +77,8 @@ func SaveAICallLog(input AICallLogInput) {
 		Status:          input.Status,
 		DurationMs:      input.DurationMs,
 		Credits:         input.Credits,
-		RequestBody:     truncateLogText(input.RequestBody, aiLogRequestTextLimit),
-		ResponseBody:    responseBody,
+		RequestBody:     truncateLogText(formatAICallLogPayload(input.RequestBody), aiLogRequestTextLimit),
+		ResponseBody:    truncateLogText(responseBody, aiLogResponseTextLimit),
 		Error:           truncateLogText(errorText, aiLogErrorTextLimit),
 		CreatedAt:       now(),
 	}
@@ -88,15 +93,13 @@ func ListAICallLogs(q model.Query) (model.AICallLogList, error) {
 	if err != nil {
 		return model.AICallLogList{}, err
 	}
-	if keyword := strings.ToLower(strings.TrimSpace(q.Keyword)); keyword != "" {
-		filtered := make([]model.AICallLog, 0, len(items))
-		for _, item := range items {
-			if aiLogMatchesKeyword(item, keyword) {
-				filtered = append(filtered, item)
-			}
+	filtered := make([]model.AICallLog, 0, len(items))
+	for _, item := range items {
+		if aiLogMatchesQuery(item, q) {
+			filtered = append(filtered, item)
 		}
-		items = filtered
 	}
+	items = filtered
 	sort.SliceStable(items, func(i, j int) bool {
 		return items[i].CreatedAt > items[j].CreatedAt
 	})
@@ -263,8 +266,13 @@ func readAICallLogFile(filePath string) ([]model.AICallLog, error) {
 		if err := json.Unmarshal([]byte(line), &item); err != nil {
 			continue
 		}
-		item.ResponseBody = normalizeAICallResponseLog(item.ResponseBody, item.Error)
-		item.Error = normalizeAICallErrorLog(item.Error, item.ResponseBody)
+		if item.Status == 0 || item.Status >= 400 {
+			item.Error = normalizeAICallErrorLog(item.Error, item.ResponseBody)
+			item.ResponseBody = item.Error
+		} else {
+			item.ResponseBody = ""
+			item.Error = ""
+		}
 		items = append(items, item)
 	}
 	return items, scanner.Err()
@@ -295,14 +303,99 @@ func startOfDay(value time.Time) time.Time {
 	return time.Date(year, month, day, 0, 0, 0, 0, value.Location())
 }
 
+func aiLogMatchesQuery(item model.AICallLog, q model.Query) bool {
+	if keyword := strings.ToLower(strings.TrimSpace(q.Keyword)); keyword != "" && !aiLogMatchesKeyword(item, keyword) {
+		return false
+	}
+	if userID := strings.ToLower(strings.TrimSpace(q.UserID)); userID != "" && !containsAnyLower(userID, item.UserID, item.UserDisplayName) {
+		return false
+	}
+	if modelName := strings.ToLower(strings.TrimSpace(q.Model)); modelName != "" && !strings.Contains(strings.ToLower(item.Model), modelName) {
+		return false
+	}
+	if channel := strings.ToLower(strings.TrimSpace(q.ChannelID)); channel != "" && !containsAnyLower(channel, item.ChannelID, item.ChannelName) {
+		return false
+	}
+	if method := strings.TrimSpace(q.Method); method != "" && !strings.EqualFold(item.Method, method) {
+		return false
+	}
+	if status := strings.TrimSpace(q.Status); status != "" && !aiLogMatchesStatus(item.Status, status) {
+		return false
+	}
+	if startAt := strings.TrimSpace(q.StartAt); startAt != "" && compareLogTime(item.CreatedAt, startAt) < 0 {
+		return false
+	}
+	if endAt := strings.TrimSpace(q.EndAt); endAt != "" && compareLogTime(item.CreatedAt, normalizeLogRangeEndAt(endAt)) > 0 {
+		return false
+	}
+	return true
+}
+
 func aiLogMatchesKeyword(item model.AICallLog, keyword string) bool {
 	fields := []string{item.UserID, item.UserDisplayName, item.Endpoint, item.Method, item.Model, item.ChannelID, item.ChannelName, item.RequestBody, item.ResponseBody, item.Error, strconv.Itoa(item.Status)}
+	return containsAnyLower(keyword, fields...)
+}
+
+func containsAnyLower(needle string, fields ...string) bool {
 	for _, field := range fields {
-		if strings.Contains(strings.ToLower(field), keyword) {
+		if strings.Contains(strings.ToLower(field), needle) {
 			return true
 		}
 	}
 	return false
+}
+
+func aiLogMatchesStatus(statusCode int, status string) bool {
+	switch strings.ToLower(status) {
+	case "success", "ok":
+		return statusCode >= 200 && statusCode < 400
+	case "failed", "failure", "error":
+		return statusCode == 0 || statusCode >= 400
+	}
+	want, err := strconv.Atoi(status)
+	return err == nil && statusCode == want
+}
+
+
+func normalizeLogRangeEndAt(value string) string {
+	value = strings.TrimSpace(value)
+	if len(value) != 10 {
+		return value
+	}
+	parsed, ok := parseLogTime(value)
+	if !ok {
+		return value
+	}
+	return parsed.Add(24*time.Hour - time.Nanosecond).Format(time.RFC3339Nano)
+}
+
+func compareLogTime(left string, right string) int {
+	leftTime, leftOK := parseLogTime(left)
+	rightTime, rightOK := parseLogTime(right)
+	if leftOK && rightOK {
+		if leftTime.Before(rightTime) {
+			return -1
+		}
+		if leftTime.After(rightTime) {
+			return 1
+		}
+		return 0
+	}
+	return strings.Compare(left, right)
+}
+
+func parseLogTime(value string) (time.Time, bool) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return time.Time{}, false
+	}
+	for _, layout := range []string{time.RFC3339Nano, time.RFC3339, "2006-01-02 15:04:05", "2006-01-02"} {
+		parsed, err := time.ParseInLocation(layout, value, time.Local)
+		if err == nil {
+			return parsed, true
+		}
+	}
+	return time.Time{}, false
 }
 
 func normalizeAICallResponseLog(responseBody string, errorMessage string) string {

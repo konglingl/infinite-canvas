@@ -85,6 +85,16 @@ export default function AdminUsersPage() {
             render: (_, item) => <Typography.Text>{item.credits}</Typography.Text>,
         },
         {
+            title: "邀请码",
+            dataIndex: "affCode",
+            width: 260,
+            render: (_, item) => (
+                <Typography.Text copyable type="secondary">
+                    {item.affCode || "-"}
+                </Typography.Text>
+            ),
+        },
+        {
             title: "Linux.do",
             dataIndex: "linuxDoId",
             width: 140,

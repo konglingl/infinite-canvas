@@ -70,6 +70,15 @@ func GetUserByUsername(username string) (model.User, bool, error) {
 	return findUser(db, "username = ?", username)
 }
 
+// GetUserByAffCode 根据注册邀请码/邀请标识查询用户
+func GetUserByAffCode(code string) (model.User, bool, error) {
+	db, err := DB()
+	if err != nil {
+		return model.User{}, false, err
+	}
+	return findUser(db, "aff_code = ?", code)
+}
+
 // SaveUser 保存用户信息。
 func SaveUser(user model.User) (model.User, error) {
 	db, err := DB()
@@ -97,6 +106,17 @@ func ConsumeUserCredits(id string, credits int, now string) (model.User, bool, e
 	}
 	user, ok, err := GetUserByID(id)
 	return user, ok && tx.RowsAffected > 0, err
+}
+
+func IncrementUserAffCount(id string, now string) error {
+	db, err := DB()
+	if err != nil {
+		return err
+	}
+	return db.Model(&model.User{}).Where("id = ?", id).Updates(map[string]any{
+		"aff_count":  gorm.Expr("aff_count + 1"),
+		"updated_at": now,
+	}).Error
 }
 
 func RefundUserCredits(id string, credits int, now string) (model.User, bool, error) {
@@ -140,6 +160,19 @@ func ListCreditLogs(q model.Query) ([]model.CreditLog, int64, error) {
 		like := "%" + keyword + "%"
 		tx = tx.Where("credit_logs.user_id LIKE ? OR users.display_name LIKE ? OR users.username LIKE ? OR credit_logs.type LIKE ? OR credit_logs.remark LIKE ? OR credit_logs.related_id LIKE ?", like, like, like, like, like, like)
 	}
+	if userID := strings.TrimSpace(q.UserID); userID != "" {
+		like := "%" + userID + "%"
+		tx = tx.Where("credit_logs.user_id LIKE ? OR users.display_name LIKE ? OR users.username LIKE ?", like, like, like)
+	}
+	if logType := strings.TrimSpace(q.Type); logType != "" {
+		tx = tx.Where("credit_logs.type = ?", logType)
+	}
+	if startAt := strings.TrimSpace(q.StartAt); startAt != "" {
+		tx = tx.Where("credit_logs.created_at >= ?", startAt)
+	}
+	if endAt := strings.TrimSpace(q.EndAt); endAt != "" {
+		tx = tx.Where("credit_logs.created_at <= ?", normalizeQueryEndAt(endAt))
+	}
 	var total int64
 	if err := tx.Count(&total).Error; err != nil {
 		return nil, 0, err
@@ -151,6 +184,15 @@ func ListCreditLogs(q model.Query) ([]model.CreditLog, int64, error) {
 		Limit(q.PageSize).
 		Find(&logs).Error
 	return logs, total, err
+}
+
+
+func normalizeQueryEndAt(value string) string {
+	value = strings.TrimSpace(value)
+	if len(value) == 10 && value[4] == '-' && value[7] == '-' {
+		return value + "T23:59:59.999999999Z"
+	}
+	return value
 }
 
 func DeleteCreditLog(id string) error {

@@ -11,6 +11,8 @@ export type AuthUser = {
     avatarUrl: string;
     role: UserRole;
     credits: number;
+    source: string;
+    canUseCustomChannel: boolean;
     createdAt: string;
     updatedAt: string;
 };
@@ -20,9 +22,17 @@ export type AuthSession = {
     user: AuthUser;
 };
 
+export type RedeemCodeResult = {
+    code: string;
+    credits: number;
+    balance: number;
+    user: AuthUser;
+};
+
 export type AuthPayload = {
     username: string;
     password: string;
+    inviteCode?: string;
 };
 
 export async function login(payload: AuthPayload) {
@@ -35,4 +45,8 @@ export async function register(payload: AuthPayload) {
 
 export async function fetchCurrentUser(token?: string) {
     return apiGet<AuthUser>("/api/auth/me", undefined, token);
+}
+
+export async function redeemCode(token: string, code: string) {
+    return apiPost<RedeemCodeResult>("/api/auth/redeem-code", { code }, token);
 }

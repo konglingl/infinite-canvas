@@ -1,5 +1,10 @@
 package model
 
+import (
+	"encoding/json"
+	"strings"
+)
+
 type UserRole string
 
 const (
@@ -46,14 +51,16 @@ type UserList struct {
 
 // AuthUser 用户公开信息。
 type AuthUser struct {
-	ID          string   `json:"id"`
-	Username    string   `json:"username"`
-	DisplayName string   `json:"displayName"`
-	AvatarURL   string   `json:"avatarUrl"`
-	Role        UserRole `json:"role"`
-	Credits     int      `json:"credits"`
-	CreatedAt   string   `json:"createdAt"`
-	UpdatedAt   string   `json:"updatedAt"`
+	ID                  string   `json:"id"`
+	Username            string   `json:"username"`
+	DisplayName         string   `json:"displayName"`
+	AvatarURL           string   `json:"avatarUrl"`
+	Role                UserRole `json:"role"`
+	Credits             int      `json:"credits"`
+	Source              string   `json:"source"`
+	CanUseCustomChannel bool     `json:"canUseCustomChannel"`
+	CreatedAt           string   `json:"createdAt"`
+	UpdatedAt           string   `json:"updatedAt"`
 }
 
 // AuthSession 登录会话信息。
@@ -63,16 +70,37 @@ type AuthSession struct {
 }
 
 func PublicUser(user User) AuthUser {
+	source := UserSource(user)
 	return AuthUser{
-		ID:          user.ID,
-		Username:    user.Username,
-		DisplayName: user.DisplayName,
-		AvatarURL:   user.AvatarURL,
-		Role:        user.Role,
-		Credits:     user.Credits,
-		CreatedAt:   user.CreatedAt,
-		UpdatedAt:   user.UpdatedAt,
+		ID:                  user.ID,
+		Username:            user.Username,
+		DisplayName:         user.DisplayName,
+		AvatarURL:           user.AvatarURL,
+		Role:                user.Role,
+		Credits:             user.Credits,
+		Source:              source,
+		CanUseCustomChannel: source == "sub2api",
+		CreatedAt:           user.CreatedAt,
+		UpdatedAt:           user.UpdatedAt,
 	}
+}
+
+func UserSource(user User) string {
+	if strings.HasPrefix(strings.TrimSpace(user.ID), "sub2api-") {
+		return "sub2api"
+	}
+	if extraText := strings.TrimSpace(user.Extra); extraText != "" {
+		var extra map[string]any
+		if err := json.Unmarshal([]byte(extraText), &extra); err == nil {
+			if source, ok := extra["source"].(string); ok && strings.TrimSpace(source) != "" {
+				return strings.TrimSpace(source)
+			}
+		}
+	}
+	if strings.TrimSpace(user.LinuxDoID) != "" {
+		return "linux_do"
+	}
+	return "local"
 }
 
 type CreditLogType string
@@ -81,6 +109,7 @@ const (
 	CreditLogTypeAdminAdjust CreditLogType = "admin_adjust"
 	CreditLogTypeAIConsume   CreditLogType = "ai_consume"
 	CreditLogTypeAIRefund    CreditLogType = "ai_refund"
+	CreditLogTypeRedeem      CreditLogType = "redeem"
 )
 
 // CreditLog 用户算力点变更流水。

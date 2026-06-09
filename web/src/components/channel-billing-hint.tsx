@@ -48,12 +48,12 @@ export function ChannelBillingBadge({ config, credits, compact = false, classNam
     );
 }
 
-export function ChannelBillingHint({ config, credits, className, onChannelModeChange }: ChannelBillingProps) {
+export function ChannelBillingHint({ config, credits, compact = false, className, onChannelModeChange }: ChannelBillingProps) {
     const local = isUserKeyBillingMode(config);
     return (
         <div
             className={cn(
-                "rounded-lg border px-3 py-2 text-xs leading-5",
+                compact ? "rounded-md border px-2 py-1 text-[11px] leading-4" : "rounded-lg border px-3 py-2 text-xs leading-5",
                 local ? "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-200" : "border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200",
                 className,
             )}

@@ -115,6 +115,10 @@ func normalizePublicSettingWithChannels(setting model.PublicSetting, channels []
 		enabled := true
 		setting.Auth.AllowRegister = &enabled
 	}
+	if setting.Auth.RequireInviteCode == nil {
+		disabled := false
+		setting.Auth.RequireInviteCode = &disabled
+	}
 	enabledModels := enabledChannelModels(channels)
 	if len(enabledModels) > 0 {
 		setting.ModelChannel.AvailableModels = enabledModels

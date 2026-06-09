@@ -17,6 +17,7 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
     const publicSettings = useConfigStore((state) => state.publicSettings);
     const updateConfig = useConfigStore((state) => state.updateConfig);
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
+    const canUseCustomChannel = useUserStore((state) => state.user?.canUseCustomChannel === true);
     const isLoginPage = pathname === "/login" || pathname === "/admin/login";
 
     useEffect(() => {
@@ -40,7 +41,7 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
         searchParams.delete("apiKey");
         searchParams.delete("apikey");
         window.history.replaceState(null, "", `${window.location.pathname}${searchParams.size ? `?${searchParams}` : ""}${window.location.hash}`);
-        if (!publicSettings.modelChannel.allowCustomChannel) {
+        if (!publicSettings.modelChannel.allowCustomChannel || !canUseCustomChannel) {
             openConfigDialog(false);
             message.error("后台未允许用户自定义渠道，请联系管理员进行配置");
             return;

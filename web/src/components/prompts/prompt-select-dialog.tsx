@@ -1,7 +1,7 @@
 "use client";
 
 import { Check, Search } from "lucide-react";
-import { type UIEvent, useEffect, useState } from "react";
+import { type UIEvent, useEffect, useRef, useState } from "react";
 import { App, Empty, Input, Modal, Spin, Tag } from "antd";
 
 import { ALL_PROMPTS_OPTION } from "@/services/api/prompts";
@@ -12,6 +12,8 @@ import { usePromptList } from "./use-prompt-list";
 export function PromptSelectDialog({ open, onOpenChange, onSelect }: { open: boolean; onOpenChange: (open: boolean) => void; onSelect: (prompt: string) => void }) {
     const { message } = App.useApp();
     const [keyword, setKeyword] = useState("");
+    const [keywordText, setKeywordText] = useState("");
+    const keywordComposingRef = useRef(false);
     const [selectedTags, setSelectedTags] = useState<string[]>([]);
     const [selectedCategory, setSelectedCategory] = useState(ALL_PROMPTS_OPTION);
     const { query, items, tags: promptTags, categories: promptCategories } = usePromptList({ keyword, tags: selectedTags, category: selectedCategory, enabled: open });
@@ -22,6 +24,15 @@ export function PromptSelectDialog({ open, onOpenChange, onSelect }: { open: boo
     const selectPrompt = (prompt: string) => {
         onSelect(prompt);
         onOpenChange(false);
+    };
+    const changeKeywordText = (value: string) => {
+        setKeywordText(value);
+        if (!keywordComposingRef.current) setKeyword(value);
+    };
+    const commitKeywordText = (value: string) => {
+        keywordComposingRef.current = false;
+        setKeywordText(value);
+        setKeyword(value);
     };
 
     useEffect(() => {
@@ -37,7 +48,17 @@ export function PromptSelectDialog({ open, onOpenChange, onSelect }: { open: boo
         <Modal title="提示词库" open={open} onCancel={() => onOpenChange(false)} footer={null} width={1040} centered>
             <div data-canvas-no-zoom onWheelCapture={(event) => event.stopPropagation()}>
                 <div className="mx-auto max-w-2xl">
-                    <Input size="large" prefix={<Search className="size-4 text-stone-400" />} value={keyword} onChange={(event) => setKeyword(event.target.value)} placeholder="按标题查询" />
+                    <Input
+                        size="large"
+                        prefix={<Search className="size-4 text-stone-400" />}
+                        value={keywordText}
+                        onCompositionStart={() => {
+                            keywordComposingRef.current = true;
+                        }}
+                        onCompositionEnd={(event) => commitKeywordText(event.currentTarget.value)}
+                        onChange={(event) => changeKeywordText(event.target.value)}
+                        placeholder="搜索提示词"
+                    />
                 </div>
                 <div className="mt-5 grid gap-3">
                     <div className="grid gap-2 sm:grid-cols-[56px_minmax(0,1fr)] sm:items-start">
