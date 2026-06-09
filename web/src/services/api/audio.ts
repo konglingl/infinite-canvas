@@ -2,8 +2,11 @@ import axios from "axios";
 
 import { audioMimeType, normalizeAudioFormatValue, normalizeAudioSpeedValue, normalizeAudioVoiceValue } from "@/lib/audio-generation";
 import { uploadMediaFile, type UploadedFile } from "@/services/file-storage";
+import { autoSaveGeneratedMediaToLocalBackupFolder, type GeneratedMediaAutoBackupInput } from "@/services/local-backup-folder";
 import { type AiConfig } from "@/stores/use-config-store";
 import { useUserStore } from "@/stores/use-user-store";
+
+type GeneratedAudioAutoBackupOptions = Omit<GeneratedMediaAutoBackupInput, "kind" | "blob">;
 
 function aiApiUrl(_config: AiConfig, path: string) {
     return `/api/v1${path}`;
@@ -49,11 +52,22 @@ export async function requestAudioGeneration(config: AiConfig, prompt: string): 
     }
 }
 
-export async function storeGeneratedAudio(blob: Blob, format = "mp3"): Promise<UploadedFile> {
+export async function storeGeneratedAudio(blob: Blob, format = "mp3", autoBackup?: GeneratedAudioAutoBackupOptions): Promise<UploadedFile> {
     const audio = blob.type.startsWith("audio/") ? blob : new Blob([blob], { type: audioMimeType(format) });
-    return uploadMediaFile(audio, "audio");
+    const stored = await uploadMediaFile(audio, "audio");
+    await autoSaveGeneratedMediaToLocalBackupFolder({ kind: "audio", blob: audio, extension: audioExtension(format, stored.mimeType), ...autoBackup }).catch(() => null);
+    return stored;
 }
 
+
+function audioExtension(format: string, mimeType?: string) {
+    if (mimeType?.includes("wav")) return "wav";
+    if (mimeType?.includes("ogg")) return "ogg";
+    if (mimeType?.includes("opus")) return "opus";
+    if (mimeType?.includes("aac")) return "aac";
+    if (mimeType?.includes("flac")) return "flac";
+    return format || "mp3";
+}
 function assertAudioConfig(config: AiConfig, model: string) {
     if (!model) throw new Error("请先配置音频模型");
     if (config.channelMode === "local" && !config.apiKey.trim()) throw new Error("请先配置 API Key");

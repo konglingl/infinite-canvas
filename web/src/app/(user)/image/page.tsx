@@ -24,6 +24,7 @@ import { deleteStoredImages, resolveImageUrl, uploadImage } from "@/services/ima
 import { useAssetStore } from "@/stores/use-asset-store";
 import type { ReferenceImage } from "@/types/image";
 import { requestCreditCost } from "@/constant/credits";
+import { autoSaveGeneratedImageToLocalBackupFolder } from "@/services/local-backup-folder";
 
 type GeneratedImage = {
     id: string;
@@ -179,6 +180,7 @@ export default function ImagePage() {
         try {
             const logImages = await Promise.all(
                 successImages.map(async (image) => {
+                    await autoSaveGeneratedImageToLocalBackupFolder({ dataUrl: image.dataUrl, prompt: text, model, source: "image-page" }).catch(() => null);
                     const stored = await uploadImage(image.dataUrl);
                     return { ...image, dataUrl: stored.url, storageKey: stored.storageKey, width: stored.width, height: stored.height, bytes: stored.bytes, mimeType: stored.mimeType };
                 }),

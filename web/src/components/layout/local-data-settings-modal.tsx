@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { saveAs } from "file-saver";
-import { App, Button, Modal } from "antd";
+import { App, Button, Input, Modal, Switch } from "antd";
 import { Archive, Database, Download, FileUp, FolderOpen, Trash2, X } from "lucide-react";
 
 import { createCanvasProjectsBackup, exportCanvasProjects, readCanvasProjectPackage } from "@/app/(user)/canvas/utils/canvas-export";
@@ -10,7 +10,7 @@ import { useCanvasStore } from "@/app/(user)/canvas/stores/use-canvas-store";
 import { createAssetBackupPackage, exportAssets, readAssetPackage } from "@/app/(user)/assets/asset-transfer";
 import { clearDefaultBrowserCache } from "@/services/browser-cache-cleanup";
 import { createFullLocalDataBackup, restoreFullLocalDataBackup, type FullLocalBackupExtraFile } from "@/services/local-full-backup";
-import { chooseLocalBackupFolder, forgetLocalBackupFolder, getLocalBackupFolderInfo, isLocalBackupFolderSupported, saveBlobToLocalBackupFolder, type LocalBackupFolderInfo } from "@/services/local-backup-folder";
+import { chooseLocalBackupFolder, forgetLocalBackupFolder, getLocalAutoBackupSettings, getLocalBackupFolderInfo, isLocalBackupFolderSupported, saveBlobToLocalBackupFolder, saveLocalAutoBackupSettings, type AutoBackupMediaKind, type LocalAutoBackupSettings, type LocalBackupFolderInfo } from "@/services/local-backup-folder";
 import { useAssetStore } from "@/stores/use-asset-store";
 
 type LocalDataSettingsModalProps = {
@@ -28,6 +28,7 @@ export function LocalDataSettingsModal({ open, onClose }: LocalDataSettingsModal
     const [loadingAction, setLoadingAction] = useState<LoadingAction>(null);
     const [backupFolder, setBackupFolder] = useState<LocalBackupFolderInfo | null>(null);
     const [folderSupported, setFolderSupported] = useState(false);
+    const [autoBackupSettings, setAutoBackupSettings] = useState<LocalAutoBackupSettings | null>(null);
     const canvasProjects = useCanvasStore((state) => state.projects);
     const importProject = useCanvasStore((state) => state.importProject);
     const assets = useAssetStore((state) => state.assets);
@@ -37,6 +38,7 @@ export function LocalDataSettingsModal({ open, onClose }: LocalDataSettingsModal
     useEffect(() => {
         if (!open) return;
         const supported = isLocalBackupFolderSupported();
+        void getLocalAutoBackupSettings().then(setAutoBackupSettings).catch(() => setAutoBackupSettings(null));
         setFolderSupported(supported);
         if (!supported) {
             setBackupFolder(null);
@@ -71,6 +73,25 @@ export function LocalDataSettingsModal({ open, onClose }: LocalDataSettingsModal
             setBackupFolder(null);
             message.success("已取消记住的备份文件夹");
         });
+
+    const updateAutoBackupSettings = async (settings: LocalAutoBackupSettings) => {
+        setAutoBackupSettings(settings);
+        try {
+            setAutoBackupSettings(await saveLocalAutoBackupSettings(settings));
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : "保存自动保存设置失败");
+        }
+    };
+
+    const updateAutoBackupEnabled = (enabled: boolean) => {
+        if (!autoBackupSettings) return;
+        void updateAutoBackupSettings({ ...autoBackupSettings, enabled });
+    };
+
+    const updateAutoBackupItem = (kind: AutoBackupMediaKind | "canvas", patch: Partial<LocalAutoBackupSettings["canvas"]>) => {
+        if (!autoBackupSettings) return;
+        void updateAutoBackupSettings({ ...autoBackupSettings, [kind]: { ...autoBackupSettings[kind], ...patch } } as LocalAutoBackupSettings);
+    };
 
     const createStructuredBackupFiles = async (timestamp: string) => {
         const files: FullLocalBackupExtraFile[] = [];
@@ -294,6 +315,30 @@ export function LocalDataSettingsModal({ open, onClose }: LocalDataSettingsModal
                     </div>
                 </section>
 
+                <section className="rounded-xl border border-sky-200 bg-sky-50/50 p-4 dark:border-sky-900/60 dark:bg-sky-950/20">
+                    <div className="mb-3 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+                        <div className="min-w-0">
+                            <div className="flex items-center gap-2 text-sm font-medium text-sky-800 dark:text-sky-100">
+                                <Archive className="size-4" />
+                                <span>{"生成内容自动保存"}</span>
+                            </div>
+                            <div className="mt-1 text-xs leading-5 text-sky-700/80 dark:text-sky-100/75">
+                                {"选择备份文件夹并保持浏览器授权后，生成成功的图片、视频、音频会自动写入对应子文件夹；画布每 30 分钟自动归档一次，只保留 3 个轮转存档。"}
+                            </div>
+                        </div>
+                        <Switch checked={autoBackupSettings?.enabled ?? false} disabled={!autoBackupSettings || !backupFolder} onChange={updateAutoBackupEnabled} checkedChildren={"开启"} unCheckedChildren={"关闭"} />
+                    </div>
+                    {!backupFolder ? <div className="mb-3 rounded-lg border border-sky-200 bg-white/70 px-3 py-2 text-xs text-sky-700 dark:border-sky-900/60 dark:bg-sky-950/40 dark:text-sky-100/75">{"请先选择本地备份文件夹。自动保存不会弹出下载框，浏览器未授权写入时会自动跳过。"}</div> : null}
+                    {autoBackupSettings ? (
+                        <div className="grid gap-3 md:grid-cols-2">
+                            <AutoBackupSettingRow title={"图片"} description={"生图工作台、画布图片节点和画布助手生成结果"} enabled={autoBackupSettings.image.enabled} subfolder={autoBackupSettings.image.subfolder} disabled={!autoBackupSettings.enabled} onEnabledChange={(enabled) => updateAutoBackupItem("image", { enabled })} onSubfolderChange={(subfolder) => updateAutoBackupItem("image", { subfolder })} />
+                            <AutoBackupSettingRow title={"视频"} description={"视频工作台和画布视频节点生成结果"} enabled={autoBackupSettings.video.enabled} subfolder={autoBackupSettings.video.subfolder} disabled={!autoBackupSettings.enabled} onEnabledChange={(enabled) => updateAutoBackupItem("video", { enabled })} onSubfolderChange={(subfolder) => updateAutoBackupItem("video", { subfolder })} />
+                            <AutoBackupSettingRow title={"音频"} description={"画布音频节点生成结果"} enabled={autoBackupSettings.audio.enabled} subfolder={autoBackupSettings.audio.subfolder} disabled={!autoBackupSettings.enabled} onEnabledChange={(enabled) => updateAutoBackupItem("audio", { enabled })} onSubfolderChange={(subfolder) => updateAutoBackupItem("audio", { subfolder })} />
+                            <AutoBackupSettingRow title={"画布"} description={`每 ${autoBackupSettings.canvas.intervalMinutes} 分钟自动归档，轮转保留 ${autoBackupSettings.canvas.keepArchives} 个 zip`} enabled={autoBackupSettings.canvas.enabled} subfolder={autoBackupSettings.canvas.subfolder} disabled={!autoBackupSettings.enabled} onEnabledChange={(enabled) => updateAutoBackupItem("canvas", { enabled })} onSubfolderChange={(subfolder) => updateAutoBackupItem("canvas", { subfolder })} />
+                        </div>
+                    ) : null}
+                </section>
+
                 <section className="rounded-xl border border-emerald-200 bg-emerald-50/60 p-4 dark:border-emerald-900/60 dark:bg-emerald-950/20">
                     <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                         <div className="min-w-0">
@@ -380,6 +425,21 @@ export function LocalDataSettingsModal({ open, onClose }: LocalDataSettingsModal
             <input ref={canvasInputRef} type="file" accept="application/zip,.zip" className="hidden" onChange={(event) => void importCanvasZip(event.target.files?.[0])} />
             <input ref={assetInputRef} type="file" accept="application/zip,.zip" className="hidden" onChange={(event) => void importAssetZip(event.target.files?.[0])} />
         </Modal>
+    );
+}
+
+function AutoBackupSettingRow({ title, description, enabled, subfolder, disabled, onEnabledChange, onSubfolderChange }: { title: string; description: string; enabled: boolean; subfolder: string; disabled?: boolean; onEnabledChange: (enabled: boolean) => void; onSubfolderChange: (subfolder: string) => void }) {
+    return (
+        <div className="rounded-lg border border-sky-200 bg-white/75 p-3 dark:border-sky-900/60 dark:bg-sky-950/40">
+            <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                    <div className="text-sm font-medium text-stone-900 dark:text-stone-100">{title}</div>
+                    <div className="mt-1 text-xs leading-5 text-stone-500 dark:text-stone-400">{description}</div>
+                </div>
+                <Switch size="small" checked={enabled} disabled={disabled} onChange={onEnabledChange} />
+            </div>
+            <Input size="small" className="mt-3" value={subfolder} disabled={disabled || !enabled} addonBefore={"子文件夹"} onChange={(event) => onSubfolderChange(event.target.value)} />
+        </div>
     );
 }
 

@@ -16,6 +16,7 @@ import { nanoid } from "nanoid";
 import { cn } from "@/lib/utils";
 import { requestEdit, requestGeneration, requestImageQuestion, type ChatCompletionMessage } from "@/services/api/image";
 import { imageToDataUrl, uploadImage } from "@/services/image-storage";
+import { autoSaveGeneratedImageToLocalBackupFolder } from "@/services/local-backup-folder";
 import { useAssetStore } from "@/stores/use-asset-store";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { imageReferenceLabel } from "@/lib/image-reference-prompt";
@@ -172,7 +173,12 @@ export function CanvasAssistantPanel({ nodes, selectedNodeIds, sessions, activeS
                     refs.filter((item) => item.dataUrl).map(async (item) => ({ id: item.id, name: `${item.title}.png`, type: "image/png", dataUrl: await imageToDataUrl(item), storageKey: item.storageKey })),
                 );
                 const images = referenceImages.length ? await requestEdit(requestConfig, text, referenceImages) : await requestGeneration(requestConfig, text);
-                const storedImages = await Promise.all(images.map((image) => uploadImage(image.dataUrl)));
+                const storedImages = await Promise.all(
+                    images.map(async (image) => {
+                        await autoSaveGeneratedImageToLocalBackupFolder({ dataUrl: image.dataUrl, prompt: text, model: requestConfig.model, source: "canvas-assistant" }).catch(() => null);
+                        return uploadImage(image.dataUrl);
+                    }),
+                );
                 updateMessage(session.id, assistantId, {
                     text: `生成了 ${storedImages.length} 张图片`,
                     images: storedImages.map((image, index) => ({ id: images[index].id, dataUrl: image.url, storageKey: image.storageKey, prompt: text })),

@@ -2,6 +2,7 @@ import axios from "axios";
 
 import { dataUrlToFile } from "@/lib/image-utils";
 import { getMediaBlob, uploadMediaFile, type UploadedFile } from "@/services/file-storage";
+import { autoSaveGeneratedMediaToLocalBackupFolder, type GeneratedMediaAutoBackupInput } from "@/services/local-backup-folder";
 import { imageToDataUrl } from "@/services/image-storage";
 import { boolConfig, buildSeedancePromptText, isSeedanceVideoConfig, normalizeSeedanceDuration, normalizeSeedanceRatio, normalizeSeedanceResolution, seedanceVideoReferenceError, SEEDANCE_REFERENCE_LIMITS } from "@/lib/seedance-video";
 import { type AiConfig } from "@/stores/use-config-store";
@@ -18,6 +19,7 @@ type SeedanceTask = {
     content?: { video_url?: string; last_frame_url?: string } | null;
 };
 type ApiEnvelope<T> = T | { code?: number; data?: T | null; msg?: string };
+type GeneratedVideoAutoBackupOptions = Omit<GeneratedMediaAutoBackupInput, "kind" | "blob">;
 type ReferenceMediaUploadResponse = { id: string; url: string; mimeType: string; bytes: number };
 
 export type VideoGenerationResult = { blob?: Blob; url?: string; mimeType?: string };
@@ -51,12 +53,30 @@ export async function requestVideoGeneration(config: AiConfig, prompt: string, r
     return requestOpenAIVideoGeneration(config, model, prompt, references);
 }
 
-export async function storeGeneratedVideo(result: VideoGenerationResult): Promise<UploadedFile> {
-    if (result.blob) return uploadMediaFile(result.blob, "video");
-    if (result.url) return { url: result.url, storageKey: "", bytes: 0, mimeType: result.mimeType || "video/mp4" };
+export async function storeGeneratedVideo(result: VideoGenerationResult, autoBackup?: GeneratedVideoAutoBackupOptions): Promise<UploadedFile> {
+    if (result.blob) {
+        const stored = await uploadMediaFile(result.blob, "video");
+        await autoSaveGeneratedMediaToLocalBackupFolder({ kind: "video", blob: result.blob, extension: videoExtension(stored.mimeType), ...autoBackup }).catch(() => null);
+        return stored;
+    }
+    if (result.url) {
+        const mimeType = result.mimeType || "video/mp4";
+        await fetch(result.url)
+            .then(async (response) => {
+                if (response.ok) await autoSaveGeneratedMediaToLocalBackupFolder({ kind: "video", blob: await response.blob(), extension: videoExtension(mimeType), ...autoBackup });
+            })
+            .catch(() => null);
+        return { url: result.url, storageKey: "", bytes: 0, mimeType };
+    }
     throw new Error("视频接口没有返回可播放的视频");
 }
 
+
+function videoExtension(mimeType?: string) {
+    if (mimeType?.includes("webm")) return "webm";
+    if (mimeType?.includes("quicktime")) return "mov";
+    return "mp4";
+}
 async function requestOpenAIVideoGeneration(config: AiConfig, model: string, prompt: string, references: ReferenceImage[]) {
     const body = new FormData();
     body.append("model", model);
