@@ -14,6 +14,7 @@ import { defaultConfig, type AiConfig, useConfigStore, useEffectiveConfig } from
 import { resolveImageUrl, uploadImage, type UploadedImage } from "@/services/image-storage";
 import { resolveMediaUrl, uploadMediaFile, type UploadedFile } from "@/services/file-storage";
 import { autoSaveGeneratedImageToLocalBackupFolder } from "@/services/local-backup-folder";
+import { useCopyText } from "@/hooks/use-copy-text";
 import { nanoid } from "nanoid";
 import { getDataUrlByteSize, readImageMeta } from "@/lib/image-utils";
 import { canvasThemes, type CanvasBackgroundMode } from "@/lib/canvas-theme";
@@ -94,6 +95,9 @@ const NODE_STATUS_SUCCESS = "success" as const;
 const NODE_STATUS_ERROR = "error" as const;
 const CANVAS_IMAGE_MAX_COUNT = 30;
 const CANVAS_IMAGE_BATCH_CONCURRENCY = 10;
+const CANVAS_AUTO_LAYOUT_GAP_X = 96;
+const CANVAS_AUTO_LAYOUT_GAP_Y = 72;
+const CANVAS_AUTO_LAYOUT_MAX_COLUMNS = 4;
 
 const IMAGE_PROMPT_REVERSE_PRESET = `请根据参考图片反推一段适合用于 AI 生图的提示词。
 
@@ -119,6 +123,182 @@ function createCanvasNode(type: CanvasNodeType, position: Position, metadata?: C
         metadata: { ...spec.metadata, ...metadata },
     };
 }
+
+type CanvasNodeBounds = { left: number; top: number; right: number; bottom: number; width: number; height: number };
+
+function getCanvasNodePromptText(node: CanvasNodeData) {
+    return node.metadata?.prompt?.trim() || (node.type === CanvasNodeType.Text ? node.metadata?.content?.trim() : "");
+}
+
+function sortCanvasNodesForLayout(a: CanvasNodeData, b: CanvasNodeData) {
+    return a.position.y - b.position.y || a.position.x - b.position.x || a.id.localeCompare(b.id);
+}
+
+function getCanvasNodeBounds(layoutNodes: CanvasNodeData[]): CanvasNodeBounds {
+    const left = Math.min(...layoutNodes.map((node) => node.position.x));
+    const top = Math.min(...layoutNodes.map((node) => node.position.y));
+    const right = Math.max(...layoutNodes.map((node) => node.position.x + node.width));
+    const bottom = Math.max(...layoutNodes.map((node) => node.position.y + node.height));
+    return { left, top, right, bottom, width: right - left, height: bottom - top };
+}
+
+function collectConnectedCanvasNodeIds(rootId: string, nodes: CanvasNodeData[], connections: CanvasConnection[]) {
+    const existingIds = new Set(nodes.map((node) => node.id));
+    if (!existingIds.has(rootId)) return new Set<string>();
+
+    const result = new Set<string>([rootId]);
+    const queue = [rootId];
+    while (queue.length) {
+        const currentId = queue.shift();
+        if (!currentId) continue;
+        connections.forEach((connection) => {
+            const nextId = connection.fromNodeId === currentId ? connection.toNodeId : connection.toNodeId === currentId ? connection.fromNodeId : null;
+            if (!nextId || !existingIds.has(nextId) || result.has(nextId)) return;
+            result.add(nextId);
+            queue.push(nextId);
+        });
+    }
+    return result;
+}
+
+function arrangeCanvasNodesInGrid(layoutNodes: CanvasNodeData[]) {
+    const positions = new Map<string, Position>();
+    if (!layoutNodes.length) return positions;
+
+    const ordered = [...layoutNodes].sort(sortCanvasNodesForLayout);
+    const bounds = getCanvasNodeBounds(ordered);
+    const columnCount = Math.max(1, Math.min(CANVAS_AUTO_LAYOUT_MAX_COLUMNS, Math.ceil(Math.sqrt(ordered.length))));
+    const rowCount = Math.ceil(ordered.length / columnCount);
+    const columnWidths = Array.from({ length: columnCount }, () => 0);
+    const rowHeights = Array.from({ length: rowCount }, () => 0);
+
+    ordered.forEach((node, index) => {
+        const column = index % columnCount;
+        const row = Math.floor(index / columnCount);
+        columnWidths[column] = Math.max(columnWidths[column], node.width);
+        rowHeights[row] = Math.max(rowHeights[row], node.height);
+    });
+
+    const totalWidth = columnWidths.reduce((sum, width) => sum + width, 0) + CANVAS_AUTO_LAYOUT_GAP_X * (columnCount - 1);
+    const totalHeight = rowHeights.reduce((sum, height) => sum + height, 0) + CANVAS_AUTO_LAYOUT_GAP_Y * (rowCount - 1);
+    const startX = bounds.left + (bounds.width - totalWidth) / 2;
+    const startY = bounds.top + (bounds.height - totalHeight) / 2;
+    const columnLefts = columnWidths.reduce<number[]>((acc, _width, index) => {
+        acc.push(index === 0 ? startX : acc[index - 1] + columnWidths[index - 1] + CANVAS_AUTO_LAYOUT_GAP_X);
+        return acc;
+    }, []);
+    const rowTops = rowHeights.reduce<number[]>((acc, _height, index) => {
+        acc.push(index === 0 ? startY : acc[index - 1] + rowHeights[index - 1] + CANVAS_AUTO_LAYOUT_GAP_Y);
+        return acc;
+    }, []);
+
+    ordered.forEach((node, index) => {
+        const column = index % columnCount;
+        const row = Math.floor(index / columnCount);
+        positions.set(node.id, {
+            x: columnLefts[column] + (columnWidths[column] - node.width) / 2,
+            y: rowTops[row] + (rowHeights[row] - node.height) / 2,
+        });
+    });
+
+    return positions;
+}
+
+function arrangeCanvasNodesByConnections(layoutNodes: CanvasNodeData[], connections: CanvasConnection[]) {
+    const ids = new Set(layoutNodes.map((node) => node.id));
+    const linkedConnections = connections.filter((connection) => ids.has(connection.fromNodeId) && ids.has(connection.toNodeId));
+    if (layoutNodes.length < 2 || !linkedConnections.length) return arrangeCanvasNodesInGrid(layoutNodes);
+
+    const incoming = new Map<string, string[]>();
+    const outgoing = new Map<string, string[]>();
+    linkedConnections.forEach((connection) => {
+        outgoing.set(connection.fromNodeId, [...(outgoing.get(connection.fromNodeId) || []), connection.toNodeId]);
+        incoming.set(connection.toNodeId, [...(incoming.get(connection.toNodeId) || []), connection.fromNodeId]);
+    });
+
+    const ordered = [...layoutNodes].sort(sortCanvasNodesForLayout);
+    const levels = new Map<string, number>();
+    let queue = ordered.filter((node) => !(incoming.get(node.id) || []).length).map((node) => node.id);
+    if (!queue.length) queue = [ordered[0].id];
+    queue.forEach((id) => levels.set(id, 0));
+
+    while (levels.size < ordered.length) {
+        while (queue.length) {
+            const nodeId = queue.shift();
+            if (!nodeId) continue;
+            const nextLevel = (levels.get(nodeId) || 0) + 1;
+            (outgoing.get(nodeId) || []).forEach((nextId) => {
+                if (levels.has(nextId)) return;
+                levels.set(nextId, nextLevel);
+                queue.push(nextId);
+            });
+        }
+
+        const unvisited = ordered.find((node) => !levels.has(node.id));
+        if (!unvisited) break;
+        const nextLevel = Math.max(0, ...levels.values()) + 1;
+        levels.set(unvisited.id, nextLevel);
+        queue = [unvisited.id];
+    }
+
+    const groups = new Map<number, CanvasNodeData[]>();
+    ordered.forEach((node) => {
+        const level = levels.get(node.id) || 0;
+        groups.set(level, [...(groups.get(level) || []), node]);
+    });
+
+    const orderedLevels = [...groups.keys()].sort((a, b) => a - b);
+    const layerWidths = orderedLevels.map((level) => Math.max(...(groups.get(level) || []).map((node) => node.width)));
+    const layerHeights = orderedLevels.map((level) => {
+        const nodesInLayer = groups.get(level) || [];
+        return nodesInLayer.reduce((sum, node) => sum + node.height, 0) + CANVAS_AUTO_LAYOUT_GAP_Y * Math.max(0, nodesInLayer.length - 1);
+    });
+    const totalWidth = layerWidths.reduce((sum, width) => sum + width, 0) + CANVAS_AUTO_LAYOUT_GAP_X * Math.max(0, orderedLevels.length - 1);
+    const totalHeight = Math.max(...layerHeights);
+    const bounds = getCanvasNodeBounds(layoutNodes);
+    const startX = bounds.left + (bounds.width - totalWidth) / 2;
+    const startY = bounds.top + (bounds.height - totalHeight) / 2;
+    const positions = new Map<string, Position>();
+    let currentX = startX;
+
+    orderedLevels.forEach((level, index) => {
+        const nodesInLayer = [...(groups.get(level) || [])].sort(sortCanvasNodesForLayout);
+        const layerWidth = layerWidths[index];
+        const layerHeight = layerHeights[index];
+        let currentY = startY + (totalHeight - layerHeight) / 2;
+        nodesInLayer.forEach((node) => {
+            positions.set(node.id, { x: currentX + (layerWidth - node.width) / 2, y: currentY });
+            currentY += node.height + CANVAS_AUTO_LAYOUT_GAP_Y;
+        });
+        currentX += layerWidth + CANVAS_AUTO_LAYOUT_GAP_X;
+    });
+
+    return positions;
+}
+
+function imageBlobToPngBlob(blob: Blob) {
+    return new Promise<Blob>((resolve, reject) => {
+        const image = new Image();
+        const objectUrl = URL.createObjectURL(blob);
+        image.onload = () => {
+            const canvas = document.createElement("canvas");
+            canvas.width = image.naturalWidth || image.width;
+            canvas.height = image.naturalHeight || image.height;
+            canvas.getContext("2d")?.drawImage(image, 0, 0);
+            canvas.toBlob((pngBlob) => {
+                URL.revokeObjectURL(objectUrl);
+                if (pngBlob) resolve(pngBlob);
+                else reject(new Error("图片转换失败"));
+            }, "image/png");
+        };
+        image.onerror = () => {
+            URL.revokeObjectURL(objectUrl);
+            reject(new Error("图片读取失败"));
+        };
+        image.src = objectUrl;
+    });
+}
+
 
 export default function CanvasPage() {
     const [mounted, setMounted] = useState(false);
@@ -212,6 +392,7 @@ function ConnectionCreateOption({ theme, icon, title, description, onClick }: { 
 
 function InfiniteCanvasPage() {
     const { message } = App.useApp();
+    const copyText = useCopyText();
     const params = useParams<{ id: string }>();
     const router = useRouter();
     const projectId = params.id;
@@ -598,6 +779,7 @@ function InfiniteCanvasPage() {
     const superResolveNode = superResolveNodeId ? nodeById.get(superResolveNodeId) || null : null;
     const angleNode = angleNodeId ? nodeById.get(angleNodeId) || null : null;
     const previewNode = previewNodeId ? nodeById.get(previewNodeId) || null : null;
+    const contextMenuNode = contextMenu?.type === "node" ? nodeById.get(contextMenu.nodeId) || null : null;
     const hasMultipleSelectedNodes = selectedNodeIds.size > 1;
     const activeNodeId = hasMultipleSelectedNodes ? null : hoveredNodeId || (selectedNodeIds.size === 1 ? Array.from(selectedNodeIds)[0] : null);
     const batchChildCountById = useMemo(() => {
@@ -1441,6 +1623,7 @@ function InfiniteCanvasPage() {
                 message.success("已加入我的素材");
                 return;
             }
+            if (node.type !== CanvasNodeType.Image) return message.error("当前节点暂不支持保存到素材");
             if (!node.metadata?.content) return message.error("没有可保存的图片");
             const dataUrl = node.metadata.storageKey ? "" : node.metadata.content;
             addAsset({
@@ -1463,6 +1646,99 @@ function InfiniteCanvasPage() {
         },
         [addAsset, message],
     );
+
+
+    const copyNodePrompt = useCallback(
+        (node: CanvasNodeData) => {
+            const prompt = getCanvasNodePromptText(node);
+            if (!prompt) {
+                message.warning("暂无可复制的提示词");
+                return;
+            }
+            copyText(prompt, "提示词已复制");
+        },
+        [copyText, message],
+    );
+
+    const copyNodeImage = useCallback(
+        async (node: CanvasNodeData) => {
+            if (node.type !== CanvasNodeType.Image || !node.metadata?.content) {
+                message.warning("当前节点没有可复制的图片");
+                return;
+            }
+
+            const content = node.metadata.content;
+            try {
+                if (!navigator.clipboard?.write || typeof ClipboardItem === "undefined") {
+                    if (navigator.clipboard?.writeText) {
+                        await navigator.clipboard.writeText(content);
+                        message.warning("浏览器不支持直接复制图片，已复制图片地址");
+                        return;
+                    }
+                    message.error("浏览器不支持复制图片");
+                    return;
+                }
+
+                const response = await fetch(content);
+                let blob = await response.blob();
+                if (!blob.type.startsWith("image/")) throw new Error("不是图片内容");
+                if (blob.type !== "image/png") blob = await imageBlobToPngBlob(blob);
+                await navigator.clipboard.write([new ClipboardItem({ [blob.type || "image/png"]: blob })]);
+                message.success("图片已复制");
+            } catch {
+                if (navigator.clipboard?.writeText) {
+                    await navigator.clipboard.writeText(content);
+                    message.warning("复制图片失败，已复制图片地址");
+                    return;
+                }
+                message.error("复制图片失败");
+            }
+        },
+        [message],
+    );
+
+    const relayoutNodeGroup = useCallback(
+        (nodeId: string) => {
+            const currentNodes = nodesRef.current;
+            const currentConnections = connectionsRef.current;
+            const hiddenIds = buildHiddenBatchNodeIds(currentNodes, currentConnections, collapsingBatchIds);
+            const selectedIds = selectedNodeIdsRef.current;
+            const targetIds = selectedIds.has(nodeId) && selectedIds.size > 1 ? new Set([...selectedIds].filter((id) => !hiddenIds.has(id))) : collectConnectedCanvasNodeIds(nodeId, currentNodes.filter((node) => !hiddenIds.has(node.id)), currentConnections);
+            const targetNodes = currentNodes.filter((node) => targetIds.has(node.id));
+            if (targetNodes.length <= 1) {
+                message.info("当前节点暂无可整理的关联节点");
+                return;
+            }
+
+            const positions = arrangeCanvasNodesByConnections(targetNodes, currentConnections);
+            setNodes((prev) => prev.map((node) => (positions.has(node.id) ? { ...node, position: positions.get(node.id)! } : node)));
+            setSelectedNodeIds(new Set(targetNodes.map((node) => node.id)));
+            setSelectedConnectionId(null);
+            setDialogNodeId(null);
+            setContextMenu(null);
+            message.success(selectedIds.has(nodeId) && selectedIds.size > 1 ? "已整理选中节点" : "已整理关联节点");
+        },
+        [collapsingBatchIds, message],
+    );
+
+    const autoLayoutCanvas = useCallback(() => {
+        const currentNodes = nodesRef.current;
+        const currentConnections = connectionsRef.current;
+        const hiddenIds = buildHiddenBatchNodeIds(currentNodes, currentConnections, collapsingBatchIds);
+        const targetNodes = currentNodes.filter((node) => !hiddenIds.has(node.id));
+        if (targetNodes.length <= 1) {
+            message.info("画布暂无可整理的节点");
+            return;
+        }
+
+        const positions = arrangeCanvasNodesInGrid(targetNodes);
+        setNodes((prev) => prev.map((node) => (positions.has(node.id) ? { ...node, position: positions.get(node.id)! } : node)));
+        setSelectedNodeIds(new Set());
+        setSelectedConnectionId(null);
+        setDialogNodeId(null);
+        setContextMenu(null);
+        message.success("已一键整理画布");
+    }, [collapsingBatchIds, message]);
 
     const createImageReversePromptNodes = useCallback(
         (node: CanvasNodeData) => {
@@ -2474,6 +2750,8 @@ function InfiniteCanvasPage() {
                             onContextMenu={(event, id) => {
                                 event.preventDefault();
                                 event.stopPropagation();
+                                setSelectedConnectionId(null);
+                                setSelectedNodeIds((current) => (current.has(id) ? current : new Set([id])));
                                 setContextMenu({ type: "node", x: event.clientX, y: event.clientY, nodeId: id });
                             }}
                         />
@@ -2557,7 +2835,23 @@ function InfiniteCanvasPage() {
                 {contextMenu ? (
                     <CanvasNodeContextMenu
                         menu={contextMenu}
+                        node={contextMenuNode}
                         onClose={() => setContextMenu(null)}
+                        onSaveAsset={() => {
+                            if (!contextMenuNode) return;
+                            void saveNodeAsset(contextMenuNode);
+                            setContextMenu(null);
+                        }}
+                        onCopyImage={() => {
+                            if (!contextMenuNode) return;
+                            void copyNodeImage(contextMenuNode);
+                            setContextMenu(null);
+                        }}
+                        onCopyPrompt={() => {
+                            if (!contextMenuNode) return;
+                            copyNodePrompt(contextMenuNode);
+                            setContextMenu(null);
+                        }}
                         onDuplicate={() => {
                             if (contextMenu.type !== "node") return;
                             duplicateNode(contextMenu.nodeId);
@@ -2571,6 +2865,11 @@ function InfiniteCanvasPage() {
                             }
                             setContextMenu(null);
                         }}
+                        onRelayout={() => {
+                            if (contextMenu.type !== "node") return;
+                            relayoutNodeGroup(contextMenu.nodeId);
+                        }}
+                        onAutoLayout={autoLayoutCanvas}
                     />
                 ) : null}
 
