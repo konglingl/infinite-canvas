@@ -1,7 +1,9 @@
+import http from "node:http";
+import https from "node:https";
 import type { NextRequest } from "next/server";
 
 export const runtime = "nodejs";
-export const maxDuration = 300;
+export const maxDuration = 900;
 
 type RouteContext = {
     params: Promise<{ path: string[] }>;
@@ -36,64 +38,83 @@ function errorJSON(message: string) {
     return JSON.stringify({ code: 1, data: null, msg: message });
 }
 
-function proxyWithKeepAlive(request: NextRequest, target: string, hasBody: boolean) {
+function nodeProxyHeaders(request: NextRequest, bodyBytes: Uint8Array | null) {
+    const headers: Record<string, string> = {};
+    proxyHeaders(request).forEach((value, key) => {
+        headers[key] = value;
+    });
+    if (bodyBytes) headers["content-length"] = String(bodyBytes.byteLength);
+    return headers;
+}
+
+async function proxyWithKeepAlive(request: NextRequest, target: string, hasBody: boolean) {
     const encoder = new TextEncoder();
-    const abortController = new AbortController();
+    const bodyBytes = hasBody ? new Uint8Array(await request.arrayBuffer()) : null;
     let timer: ReturnType<typeof setInterval> | null = null;
+    let upstreamRequest: http.ClientRequest | null = null;
+    let closed = false;
 
     const stream = new ReadableStream<Uint8Array>({
-        async start(controller) {
-            const writeKeepAlive = () => {
+        start(controller) {
+            const clearKeepAlive = () => {
+                if (!timer) return;
+                clearInterval(timer);
+                timer = null;
+            };
+            const enqueue = (value: Uint8Array) => {
+                if (closed) return;
                 try {
-                    controller.enqueue(encoder.encode("\n"));
+                    controller.enqueue(value);
                 } catch {
-                    if (timer) clearInterval(timer);
+                    closed = true;
+                    clearKeepAlive();
+                    upstreamRequest?.destroy();
                 }
             };
+            const close = () => {
+                if (closed) return;
+                closed = true;
+                clearKeepAlive();
+                try {
+                    controller.close();
+                } catch {}
+            };
+            const fail = (error: unknown) => {
+                clearKeepAlive();
+                console.error("Failed to proxy long image request", target, error);
+                enqueue(encoder.encode(errorJSON("API connection failed, please try again later")));
+                close();
+            };
+            const writeKeepAlive = () => enqueue(encoder.encode("\n"));
 
             writeKeepAlive();
             timer = setInterval(writeKeepAlive, keepAliveIntervalMs);
 
-            try {
-                const response = await fetch(target, {
+            const targetUrl = new URL(target);
+            const client = targetUrl.protocol === "https:" ? https : http;
+            upstreamRequest = client.request(
+                targetUrl,
+                {
                     method: request.method,
-                    headers: proxyHeaders(request),
-                    body: hasBody ? request.body : undefined,
-                    duplex: hasBody ? "half" : undefined,
-                    redirect: "manual",
-                    signal: abortController.signal,
-                } as RequestInit & { duplex?: "half" });
-
-                if (timer) {
-                    clearInterval(timer);
-                    timer = null;
-                }
-
-                if (response.body) {
-                    const reader = response.body.getReader();
-                    while (true) {
-                        const { done, value } = await reader.read();
-                        if (done) break;
-                        if (value) controller.enqueue(value);
-                    }
-                } else {
-                    controller.enqueue(encoder.encode(await response.text()));
-                }
-            } catch (error) {
-                if (!abortController.signal.aborted) {
-                    console.error("Failed to proxy long image request", target, error);
-                    controller.enqueue(encoder.encode(errorJSON("API connection failed, please try again later")));
-                }
-            } finally {
-                if (timer) clearInterval(timer);
-                try {
-                    controller.close();
-                } catch {}
-            }
+                    headers: nodeProxyHeaders(request, bodyBytes),
+                    timeout: 0,
+                },
+                (response) => {
+                    clearKeepAlive();
+                    response.on("data", (chunk: Buffer) => enqueue(new Uint8Array(chunk)));
+                    response.on("end", close);
+                    response.on("error", fail);
+                },
+            );
+            upstreamRequest.setTimeout(0);
+            upstreamRequest.on("error", fail);
+            if (bodyBytes) upstreamRequest.write(bodyBytes);
+            upstreamRequest.end();
         },
         cancel() {
+            closed = true;
             if (timer) clearInterval(timer);
-            abortController.abort();
+            upstreamRequest?.destroy();
         },
     });
 
@@ -102,6 +123,7 @@ function proxyWithKeepAlive(request: NextRequest, target: string, hasBody: boole
         headers: {
             "Content-Type": "application/json; charset=utf-8",
             "Cache-Control": "no-store",
+            "X-Shengtu-Long-Proxy": "node-http",
         },
     });
 }
