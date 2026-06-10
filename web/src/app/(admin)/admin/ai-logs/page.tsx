@@ -207,9 +207,9 @@ export default function AdminAICallLogsPage() {
                                 </Form.Item>
                             </Col>
                             <Col flex="none">
-                                <Form.Item label="本地直连日志">
+                                <Form.Item label="浏览器直连日志">
                                     <div className="flex h-8 items-center gap-2 rounded-md border border-stone-200 px-3 dark:border-stone-800">
-                                        <Typography.Text className="whitespace-nowrap text-sm">上报</Typography.Text>
+                                        <Typography.Text className="whitespace-nowrap text-sm">主动上报</Typography.Text>
                                         <Switch size="small" checked={localDirectReportEnabled} loading={savingLocalDirectReport} onChange={(checked) => void updateLocalDirectReport(checked)} />
                                     </div>
                                 </Form.Item>
@@ -227,7 +227,7 @@ export default function AdminAICallLogsPage() {
                             </Col>
                         </Row>
                     </Form>
-                    <Typography.Text type="secondary">管理员默认查看全站 AI 调用日志；填写用户筛选后可只查看指定成员。</Typography.Text>
+                    <Typography.Text type="secondary">管理员默认查看全站 AI 调用日志；经本站 /api/v1 代理的自带 Key 调用会默认记录，此开关只控制浏览器绕过后端直连时的主动上报；填写用户筛选后可只查看指定成员。</Typography.Text>
                 </Card>
                 <Card variant="borderless" title={<span>AI 调用日志 <Tag>{total} 条</Tag></span>}>
                     <Table

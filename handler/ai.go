@@ -93,7 +93,7 @@ func proxyAIGetRequest(w http.ResponseWriter, r *http.Request, path string) {
 			return
 		}
 		user, _ := service.UserFromContext(r.Context())
-		logContext := aiProxyLogContextFor(user, endpoint, http.MethodGet, modelName, channel, 0, "", startedAt, service.LocalDirectAILogEnabled())
+		logContext := aiProxyLogContextFor(user, endpoint, http.MethodGet, modelName, channel, 0, "", startedAt, true)
 		path = resolveAIProxyPath(channel.BaseURL, modelName, path)
 		request, err := http.NewRequest(http.MethodGet, service.BuildModelChannelURL(channel, path), nil)
 		if err != nil {
@@ -144,7 +144,7 @@ func proxyAIRequest(w http.ResponseWriter, r *http.Request, path string) {
 			return
 		}
 		user, _ := service.UserFromContext(r.Context())
-		logContext := aiProxyLogContextFor(user, endpoint, http.MethodPost, modelName, channel, 0, requestBodyForLog, startedAt, service.LocalDirectAILogEnabled())
+		logContext := aiProxyLogContextFor(user, endpoint, http.MethodPost, modelName, channel, 0, requestBodyForLog, startedAt, true)
 		path = resolveAIProxyPath(channel.BaseURL, modelName, path)
 		request, err := http.NewRequest(http.MethodPost, service.BuildModelChannelURL(channel, path), bytes.NewReader(body))
 		if err != nil {
