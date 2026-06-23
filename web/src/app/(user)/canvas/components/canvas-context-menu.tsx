@@ -15,6 +15,8 @@ type CanvasNodeContextMenuProps = {
     onSaveAsset: () => void;
     onCopyImage: () => void;
     onCopyPrompt: () => void;
+    onCopyWorkflowPrompts: () => void;
+    onCopyWorkflowStagePrompts: () => void;
     onCreateImageConfig: () => void;
     onCreateVideoConfig: () => void;
     onSelectWorkflow: () => void;
@@ -27,7 +29,7 @@ type CanvasNodeContextMenuProps = {
     onAutoLayout: () => void;
 };
 
-export function CanvasNodeContextMenu({ menu, node, onClose, onSaveAsset, onCopyImage, onCopyPrompt, onCreateImageConfig, onCreateVideoConfig, onSelectWorkflow, onRelayoutWorkflow, onSelectWorkflowStage, onRelayoutWorkflowStage, onDuplicate, onDelete, onRelayout, onAutoLayout }: CanvasNodeContextMenuProps) {
+export function CanvasNodeContextMenu({ menu, node, onClose, onSaveAsset, onCopyImage, onCopyPrompt, onCopyWorkflowPrompts, onCopyWorkflowStagePrompts, onCreateImageConfig, onCreateVideoConfig, onSelectWorkflow, onRelayoutWorkflow, onSelectWorkflowStage, onRelayoutWorkflowStage, onDuplicate, onDelete, onRelayout, onAutoLayout }: CanvasNodeContextMenuProps) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const isNodeMenu = menu.type === "node" && Boolean(node);
     const canSaveAsset = Boolean(node && ((node.type === CanvasNodeType.Text && node.metadata?.content?.trim()) || ((node.type === CanvasNodeType.Image || node.type === CanvasNodeType.Video) && node.metadata?.content)));
@@ -58,6 +60,8 @@ export function CanvasNodeContextMenu({ menu, node, onClose, onSaveAsset, onCopy
                     <MenuButton icon={<FolderPlus className="size-4" />} label="保存到素材" onClick={onSaveAsset} disabled={!canSaveAsset} />
                     <MenuButton icon={<Copy className="size-4" />} label="复制图片" onClick={onCopyImage} disabled={!canCopyImage} />
                     <MenuButton icon={<FileText className="size-4" />} label="复制提示词" onClick={onCopyPrompt} disabled={!canCopyPrompt} />
+                    <MenuButton icon={<FileText className="size-4" />} label="复制同工作流提示词" onClick={onCopyWorkflowPrompts} disabled={!canSelectWorkflow} />
+                    <MenuButton icon={<FileText className="size-4" />} label="复制同阶段提示词" onClick={onCopyWorkflowStagePrompts} disabled={!canSelectWorkflowStage} />
                     <MenuButton icon={<ImageIcon className="size-4" />} label="转生图配置" onClick={onCreateImageConfig} disabled={!canCreateConfigFromText} />
                     <MenuButton icon={<Video className="size-4" />} label="转视频配置" onClick={onCreateVideoConfig} disabled={!canCreateConfigFromText} />
                     <MenuButton icon={<Grid2x2 className="size-4" />} label="选择同工作流节点" onClick={onSelectWorkflow} disabled={!canSelectWorkflow} />

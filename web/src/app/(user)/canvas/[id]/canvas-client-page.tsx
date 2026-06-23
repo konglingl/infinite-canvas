@@ -380,6 +380,16 @@ function sortCanvasNodesForLayout(a: CanvasNodeData, b: CanvasNodeData) {
     return a.position.y - b.position.y || a.position.x - b.position.x || a.id.localeCompare(b.id);
 }
 
+function getWorkflowStageOrder(stage?: string) {
+    return ["总纲", "资产设定", "分镜文案", "生图配置", "视频配置"].indexOf(stage || "");
+}
+
+function sortWorkflowNodesForPromptCopy(a: CanvasNodeData, b: CanvasNodeData) {
+    const aStageOrder = getWorkflowStageOrder(a.metadata?.workflowStage);
+    const bStageOrder = getWorkflowStageOrder(b.metadata?.workflowStage);
+    return (aStageOrder < 0 ? Number.MAX_SAFE_INTEGER : aStageOrder) - (bStageOrder < 0 ? Number.MAX_SAFE_INTEGER : bStageOrder) || (a.metadata?.workflowIndex ?? Number.MAX_SAFE_INTEGER) - (b.metadata?.workflowIndex ?? Number.MAX_SAFE_INTEGER) || sortCanvasNodesForLayout(a, b);
+}
+
 function getCanvasNodeBounds(layoutNodes: CanvasNodeData[]): CanvasNodeBounds {
     const left = Math.min(...layoutNodes.map((node) => node.position.x));
     const top = Math.min(...layoutNodes.map((node) => node.position.y));
@@ -2011,6 +2021,33 @@ function InfiniteCanvasPage() {
         [copyText, message],
     );
 
+    const copyWorkflowPrompts = useCallback(
+        (source: CanvasNodeData, stageOnly = false) => {
+            const workflowTitle = source.metadata?.workflowTitle;
+            const workflowStage = source.metadata?.workflowStage;
+            if (!workflowTitle || (stageOnly && !workflowStage)) {
+                message.warning(stageOnly ? "当前节点不属于故事工作流阶段" : "当前节点不属于故事工作流");
+                return;
+            }
+            const promptBlocks = nodesRef.current
+                .filter((node) => node.metadata?.workflowTitle === workflowTitle && (!stageOnly || node.metadata?.workflowStage === workflowStage))
+                .sort(sortWorkflowNodesForPromptCopy)
+                .map((node) => {
+                    const prompt = getCanvasNodePromptText(node);
+                    if (!prompt) return "";
+                    const title = [node.metadata?.workflowStage, node.metadata?.workflowIndex ? `${node.metadata.workflowIndex}/${node.metadata.workflowTotal || "?"}` : "", node.title].filter(Boolean).join(" · ");
+                    return `## ${title}\n${prompt}`;
+                })
+                .filter(Boolean);
+            if (!promptBlocks.length) {
+                message.warning("暂无可复制的提示词");
+                return;
+            }
+            copyText(promptBlocks.join("\n\n"), stageOnly ? "同阶段提示词已复制" : "同工作流提示词已复制");
+        },
+        [copyText, message],
+    );
+
     const copyNodeImage = useCallback(
         async (node: CanvasNodeData) => {
             if (node.type !== CanvasNodeType.Image || !node.metadata?.content) {
@@ -3265,6 +3302,16 @@ function InfiniteCanvasPage() {
                         onCopyPrompt={() => {
                             if (!contextMenuNode) return;
                             copyNodePrompt(contextMenuNode);
+                            setContextMenu(null);
+                        }}
+                        onCopyWorkflowPrompts={() => {
+                            if (!contextMenuNode) return;
+                            copyWorkflowPrompts(contextMenuNode);
+                            setContextMenu(null);
+                        }}
+                        onCopyWorkflowStagePrompts={() => {
+                            if (!contextMenuNode) return;
+                            copyWorkflowPrompts(contextMenuNode, true);
                             setContextMenu(null);
                         }}
                         onCreateImageConfig={() => {
