@@ -2072,6 +2072,33 @@ function InfiniteCanvasPage() {
         [collapsingBatchIds, message],
     );
 
+    const relayoutWorkflow = useCallback(
+        (node: CanvasNodeData) => {
+            const workflowTitle = node.metadata?.workflowTitle;
+            if (!workflowTitle) {
+                message.info("当前节点不属于故事工作流");
+                return;
+            }
+
+            const currentNodes = nodesRef.current;
+            const currentConnections = connectionsRef.current;
+            const workflowNodes = currentNodes.filter((item) => item.metadata?.workflowTitle === workflowTitle);
+            if (workflowNodes.length <= 1) {
+                message.info("当前工作流暂无可整理的其他节点");
+                return;
+            }
+
+            const positions = arrangeCanvasNodesByConnections(workflowNodes, currentConnections);
+            setNodes((prev) => prev.map((item) => (positions.has(item.id) ? { ...item, position: positions.get(item.id)! } : item)));
+            setSelectedNodeIds(new Set(workflowNodes.map((item) => item.id)));
+            setSelectedConnectionId(null);
+            setDialogNodeId(null);
+            setContextMenu(null);
+            message.success(`已整理 ${workflowNodes.length} 个同工作流节点`);
+        },
+        [message],
+    );
+
     const relayoutWorkflowStage = useCallback(
         (node: CanvasNodeData) => {
             const { workflowStage, workflowTitle } = node.metadata || {};
@@ -3258,6 +3285,10 @@ function InfiniteCanvasPage() {
                             setSelectedConnectionId(null);
                             setContextMenu(null);
                             message.success(`已选中 ${workflowIds.length} 个同工作流节点`);
+                        }}
+                        onRelayoutWorkflow={() => {
+                            if (!contextMenuNode) return;
+                            relayoutWorkflow(contextMenuNode);
                         }}
                         onSelectWorkflowStage={() => {
                             if (!contextMenuNode?.metadata?.workflowStage || !contextMenuNode.metadata.workflowTitle) return;
