@@ -138,11 +138,25 @@ type StoryWorkflowModelDefaults = {
     videoWatermark?: string;
 };
 
-function buildStoryWorkflowDraft(options: StoryWorkflowOptions, center: Position, defaults: StoryWorkflowModelDefaults): { nodes: CanvasNodeData[]; connections: CanvasConnection[] } {
+type StoryWorkflowAssetPlan = {
+    name: string;
+    description: string;
+};
+
+type StoryWorkflowPlan = {
+    characters: StoryWorkflowAssetPlan[];
+    scenes: StoryWorkflowAssetPlan[];
+    shots: string[];
+};
+
+function buildStoryWorkflowDraft(options: StoryWorkflowOptions, center: Position, defaults: StoryWorkflowModelDefaults, aiPlan?: StoryWorkflowPlan): { nodes: CanvasNodeData[]; connections: CanvasConnection[] } {
     const sentences = splitStorySentences(options.story);
-    const shots = buildStoryShots(sentences, options.shotCount);
-    const characters = extractStoryKeywords(options.story, CHARACTER_HINTS, 4, "主角");
-    const scenes = extractStoryKeywords(options.story, SCENE_HINTS, 4, "场景");
+    const fallbackShots = buildStoryShots(sentences, options.shotCount);
+    const fallbackCharacters = extractStoryKeywords(options.story, CHARACTER_HINTS, 4, "主角").map((name) => ({ name, description: `${name}，请根据故事补全外观、服饰、气质和关键特征。` }));
+    const fallbackScenes = extractStoryKeywords(options.story, SCENE_HINTS, 4, "场景").map((name) => ({ name, description: `${name}，请根据故事补全空间、时间、光线和氛围。` }));
+    const characters = normalizeStoryAssets(aiPlan?.characters, fallbackCharacters, 4, "主角");
+    const scenes = normalizeStoryAssets(aiPlan?.scenes, fallbackScenes, 4, "场景");
+    const shots = normalizeStoryShots(aiPlan?.shots, fallbackShots, options.shotCount);
     const nodes: CanvasNodeData[] = [];
     const connections: CanvasConnection[] = [];
     const startX = center.x - 760;
@@ -155,9 +169,9 @@ function buildStoryWorkflowDraft(options: StoryWorkflowOptions, center: Position
     });
     nodes.push(summaryNode);
 
-    const assetTextNodes = [...characters.map((name, index) => ({ kind: "角色", name, index })), ...scenes.map((name, index) => ({ kind: "场景", name, index }))].map((asset, index) =>
+    const assetTextNodes = [...characters.map((asset, index) => ({ kind: "角色", ...asset, index })), ...scenes.map((asset, index) => ({ kind: "场景", ...asset, index }))].map((asset, index) =>
         createWorkflowNode(CanvasNodeType.Text, `${asset.kind}设定：${asset.name}`, { x: startX, y: startY + 330 + index * 170 }, 390, 140, {
-            content: `${asset.kind}设定：${asset.name}\n用于后续分镜保持一致。风格要求：${options.style}。请保持主体清晰、特征稳定、背景简洁。`,
+            content: `${asset.kind}设定：${asset.name}\n${asset.description}\n统一风格：${options.style}。用于后续分镜保持一致。`,
             status: NODE_STATUS_SUCCESS,
             fontSize: 13,
         }),
@@ -182,7 +196,7 @@ function buildStoryWorkflowDraft(options: StoryWorkflowOptions, center: Position
             model: defaults.imageModel,
             size: defaults.imageSize,
             count: defaults.imageCount || 1,
-            prompt: buildShotPrompt(shots[index] || shotNode.metadata?.content || "", index, options, characters, scenes),
+            prompt: buildShotPrompt(shots[index] || shotNode.metadata?.content || "", index, options, characters.map((item) => item.name), scenes.map((item) => item.name)),
             content: shots[index] || "",
             status: NODE_STATUS_IDLE,
         }),
@@ -264,12 +278,87 @@ function extractStoryKeywords(story: string, hints: string[], limit: number, fal
     return unique;
 }
 
+function normalizeStoryAssets(assets: StoryWorkflowAssetPlan[] | undefined, fallback: StoryWorkflowAssetPlan[], limit: number, fallbackPrefix: string) {
+    const normalized = (assets || [])
+        .map((asset) => ({ name: asset.name.trim(), description: asset.description.trim() || asset.name.trim() }))
+        .filter((asset) => asset.name)
+        .slice(0, limit);
+    const names = new Set(normalized.map((asset) => asset.name));
+    for (const item of fallback) {
+        if (normalized.length >= Math.min(limit, 4)) break;
+        if (!names.has(item.name)) normalized.push(item);
+    }
+    while (normalized.length < Math.min(limit, 2)) normalized.push({ name: `${fallbackPrefix}${normalized.length + 1}`, description: `${fallbackPrefix}${normalized.length + 1}` });
+    return normalized.slice(0, limit);
+}
+
+function normalizeStoryShots(shots: string[] | undefined, fallback: string[], count: number) {
+    const safeCount = Math.min(12, Math.max(3, count));
+    const normalized = (shots || []).map((shot) => shot.trim()).filter(Boolean).slice(0, safeCount);
+    for (const shot of fallback) {
+        if (normalized.length >= safeCount) break;
+        normalized.push(shot);
+    }
+    while (normalized.length < safeCount) normalized.push(fallback[Math.min(normalized.length, fallback.length - 1)] || "补充分镜画面");
+    return normalized.slice(0, safeCount);
+}
+
 function buildShotPrompt(shot: string, index: number, options: StoryWorkflowOptions, characters: string[], scenes: string[]) {
     const characterText = characters.length ? `角色参考：${characters.join("、")}。` : "";
     const sceneText = scenes.length ? `场景参考：${scenes.join("、")}。` : "";
     return `第 ${index + 1} 个分镜。${shot}\n${characterText}${sceneText}\n统一风格：${options.style}。要求：电影分镜构图，主体清晰，动作明确，角色形象一致，画面可直接用于后续图生视频。`;
 }
 
+async function requestStoryWorkflowPlan(config: AiConfig, options: StoryWorkflowOptions): Promise<StoryWorkflowPlan> {
+    const answer = await requestImageQuestion(
+        config,
+        [
+            {
+                role: "system",
+                content: "你是分镜导演和 AI 生图工作流策划。只输出严格 JSON，不要 markdown，不要解释。",
+            },
+            {
+                role: "user",
+                content: `请把下面故事拆成适合 AI 画布的创作工作流。\n\n输出 JSON 格式：{"characters":[{"name":"","description":""}],"scenes":[{"name":"","description":""}],"shots":[""]}\n\n要求：\n1. characters 2-4 个，description 写清外观、服饰、气质和一致性特征。\n2. scenes 2-4 个，description 写清空间、光线、氛围和色彩。\n3. shots 必须刚好 ${options.shotCount} 条，每条是可直接生图的电影分镜描述。\n4. 风格统一：${options.style}\n\n标题：${options.title}\n\n故事：\n${options.story}`,
+            },
+        ],
+        () => undefined,
+    );
+    return parseStoryWorkflowPlan(answer, options.shotCount);
+}
+
+function parseStoryWorkflowPlan(text: string, shotCount: number): StoryWorkflowPlan {
+    const jsonText = extractJsonText(text);
+    const payload = JSON.parse(jsonText) as { characters?: unknown; scenes?: unknown; shots?: unknown };
+    const characters = parseStoryAssetList(payload.characters, 4);
+    const scenes = parseStoryAssetList(payload.scenes, 4);
+    const shots = Array.isArray(payload.shots) ? payload.shots.map((item) => String(item || "").trim()).filter(Boolean).slice(0, Math.min(12, Math.max(3, shotCount))) : [];
+    if (!characters.length && !scenes.length && !shots.length) throw new Error("AI 拆分结果为空");
+    return { characters, scenes, shots };
+}
+
+function parseStoryAssetList(value: unknown, limit: number): StoryWorkflowAssetPlan[] {
+    if (!Array.isArray(value)) return [];
+    return value
+        .map((item) => {
+            if (typeof item === "string") return { name: item.trim(), description: item.trim() };
+            if (!item || typeof item !== "object") return null;
+            const record = item as Record<string, unknown>;
+            const name = String(record.name || record.title || "").trim();
+            const description = String(record.description || record.prompt || record.detail || name).trim();
+            return name ? { name, description } : null;
+        })
+        .filter((item): item is StoryWorkflowAssetPlan => Boolean(item))
+        .slice(0, limit);
+}
+
+function extractJsonText(text: string) {
+    const trimmed = text.trim().replace(/^```(?:json)?/i, "").replace(/```$/i, "").trim();
+    const start = trimmed.indexOf("{");
+    const end = trimmed.lastIndexOf("}");
+    if (start < 0 || end <= start) throw new Error("AI 未返回 JSON");
+    return trimmed.slice(start, end + 1);
+}
 type CanvasNodeBounds = { left: number; top: number; right: number; bottom: number; width: number; height: number };
 
 function getCanvasNodePromptText(node: CanvasNodeData) {
@@ -984,9 +1073,9 @@ function InfiniteCanvasPage() {
     }, [connections, nodes]);
 
     const createStoryWorkflow = useCallback(
-        (options: StoryWorkflowOptions) => {
+        async (options: StoryWorkflowOptions) => {
             const center = getCanvasCenter();
-            const draft = buildStoryWorkflowDraft(options, center, {
+            const defaults = {
                 imageModel: effectiveConfig.imageModel || effectiveConfig.model,
                 videoModel: effectiveConfig.videoModel || effectiveConfig.model,
                 imageSize: effectiveConfig.size,
@@ -995,7 +1084,21 @@ function InfiniteCanvasPage() {
                 videoQuality: effectiveConfig.vquality,
                 videoGenerateAudio: effectiveConfig.videoGenerateAudio,
                 videoWatermark: effectiveConfig.videoWatermark,
-            });
+            };
+            let aiPlan: StoryWorkflowPlan | undefined;
+            if (options.useAiSplit) {
+                const hideLoading = message.loading("正在用 AI 拆分故事工作流...", 0);
+                try {
+                    aiPlan = await requestStoryWorkflowPlan({ ...effectiveConfig, model: effectiveConfig.textModel || effectiveConfig.model }, options);
+                    message.success("AI 拆分完成，已生成结构化工作流");
+                } catch (error) {
+                    console.warn("AI story workflow split failed", error);
+                    message.warning("AI 拆分失败，已使用本地规则生成工作流");
+                } finally {
+                    hideLoading();
+                }
+            }
+            const draft = buildStoryWorkflowDraft(options, center, defaults, aiPlan);
             setNodes((prev) => [...prev, ...draft.nodes]);
             setConnections((prev) => [...prev, ...draft.connections]);
             setSelectedNodeIds(new Set(draft.nodes.map((node) => node.id)));
@@ -1004,9 +1107,8 @@ function InfiniteCanvasPage() {
             setStoryWorkflowOpen(false);
             message.success(`已创建 ${draft.nodes.length} 个故事工作流节点`);
         },
-        [effectiveConfig.canvasImageCount, effectiveConfig.count, effectiveConfig.imageModel, effectiveConfig.model, effectiveConfig.size, effectiveConfig.videoGenerateAudio, effectiveConfig.videoModel, effectiveConfig.videoSeconds, effectiveConfig.videoWatermark, effectiveConfig.vquality, getCanvasCenter, message],
+        [effectiveConfig, getCanvasCenter, message],
     );
-
     const createNode = useCallback(
         (type: CanvasNodeType, position?: Position) => {
             const targetPosition = position || getCanvasCenter();

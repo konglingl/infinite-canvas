@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useMemo, useState } from "react";
 import { Button, Checkbox, Form, Input, InputNumber, Modal, Select, Space, Tag } from "antd";
@@ -10,6 +10,7 @@ export type StoryWorkflowOptions = {
     style: string;
     shotCount: number;
     createVideoNodes: boolean;
+    useAiSplit: boolean;
 };
 
 type StoryWorkflowModalProps = {
@@ -32,12 +33,13 @@ export function StoryWorkflowModal({ open, onCancel, onCreate }: StoryWorkflowMo
     const [style, setStyle] = useState(STYLE_OPTIONS[0].value);
     const [shotCount, setShotCount] = useState(6);
     const [createVideoNodes, setCreateVideoNodes] = useState(true);
+    const [useAiSplit, setUseAiSplit] = useState(true);
     const wordCount = useMemo(() => story.trim().length, [story]);
 
     const submit = () => {
         const trimmed = story.trim();
         if (!trimmed) return;
-        onCreate({ title: title.trim() || "故事工作流", story: trimmed, style, shotCount, createVideoNodes });
+        onCreate({ title: title.trim() || "故事工作流", story: trimmed, style, shotCount, createVideoNodes, useAiSplit });
         setStory("");
     };
 
@@ -100,9 +102,14 @@ export function StoryWorkflowModal({ open, onCancel, onCreate }: StoryWorkflowMo
                             placeholder="粘贴小说片段、短视频脚本、产品广告创意或分镜大纲。系统会自动拆出角色、场景和分镜节点。"
                         />
                     </Form.Item>
-                    <div className="grid gap-3 md:grid-cols-2">
+                    <div className="grid gap-3 md:grid-cols-3">
                         <Form.Item label="分镜数量">
                             <InputNumber className="w-full" min={3} max={12} value={shotCount} onChange={(value) => setShotCount(Number(value) || 6)} />
+                        </Form.Item>
+                        <Form.Item label="AI 拆分">
+                            <Checkbox checked={useAiSplit} onChange={(event) => setUseAiSplit(event.target.checked)}>
+                                调用文本模型拆角色/场景/分镜
+                            </Checkbox>
                         </Form.Item>
                         <Form.Item label="后续视频节点">
                             <Checkbox checked={createVideoNodes} onChange={(event) => setCreateVideoNodes(event.target.checked)}>
