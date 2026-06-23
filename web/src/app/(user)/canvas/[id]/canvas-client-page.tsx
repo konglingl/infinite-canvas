@@ -1120,6 +1120,26 @@ function InfiniteCanvasPage() {
         },
         [effectiveConfig, getCanvasCenter, message],
     );
+    const createStoryWorkflowFromAssistantText = useCallback(
+        (text: string) => {
+            const story = text.trim();
+            if (!story) return;
+            const firstLine = story
+                .split(/\n+/)
+                .map((line) => line.replace(/^#+\s*/, "").trim())
+                .find(Boolean);
+            void createStoryWorkflow({
+                title: (firstLine || "助手故事工作流").slice(0, 40),
+                story,
+                style: "电影感写实，真实摄影质感，统一角色外观，细腻光影，高级调色",
+                shotCount: 6,
+                createVideoNodes: true,
+                useAiSplit: true,
+            });
+        },
+        [createStoryWorkflow],
+    );
+
     const createNode = useCallback(
         (type: CanvasNodeType, position?: Position) => {
             const targetPosition = position || getCanvasCenter();
@@ -3222,6 +3242,7 @@ function InfiniteCanvasPage() {
                     onSessionsChange={handleAssistantSessionsChange}
                     onInsertImage={insertAssistantImage}
                     onInsertText={insertAssistantText}
+                    onCreateStoryWorkflowFromText={createStoryWorkflowFromAssistantText}
                     onPasteImage={pasteAssistantImage}
                     onCollapseStart={() => setAssistantCollapsed(true)}
                     onCollapse={() => setAssistantMounted(false)}

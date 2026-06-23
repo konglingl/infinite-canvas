@@ -47,12 +47,13 @@ type CanvasAssistantPanelProps = {
     onSessionsChange: (sessions: CanvasAssistantSession[], activeSessionId: string | null) => void;
     onInsertImage: (image: CanvasAssistantImage) => void;
     onInsertText: (text: string) => void;
+    onCreateStoryWorkflowFromText?: (text: string) => void;
     onPasteImage: (file: File) => void;
     onCollapseStart: () => void;
     onCollapse: () => void;
 };
 
-export function CanvasAssistantPanel({ nodes, selectedNodeIds, sessions, activeSessionId, onSelectNodeIds, onSessionsChange, onInsertImage, onInsertText, onPasteImage, onCollapseStart, onCollapse }: CanvasAssistantPanelProps) {
+export function CanvasAssistantPanel({ nodes, selectedNodeIds, sessions, activeSessionId, onSelectNodeIds, onSessionsChange, onInsertImage, onInsertText, onCreateStoryWorkflowFromText, onPasteImage, onCollapseStart, onCollapse }: CanvasAssistantPanelProps) {
     const { message } = App.useApp();
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const effectiveConfig = useEffectiveConfig();
@@ -336,7 +337,7 @@ export function CanvasAssistantPanel({ nodes, selectedNodeIds, sessions, activeS
                             onDelete={(id) => setDeleteChatIds([id])}
                         />
                     ) : messages.length ? (
-                        <AssistantMessages messages={messages} onRetry={retryMessage} onInsertImage={onInsertImage} onInsertText={onInsertText} />
+                        <AssistantMessages messages={messages} onRetry={retryMessage} onInsertImage={onInsertImage} onInsertText={onInsertText} onCreateStoryWorkflowFromText={onCreateStoryWorkflowFromText} />
                     ) : (
                         <div className="flex h-full flex-col items-center justify-center px-1 text-center">
                             <div className="relative font-serif text-4xl font-bold italic tracking-normal" style={{ color: theme.node.text }}>
@@ -562,11 +563,13 @@ function AssistantMessages({
     onRetry,
     onInsertImage,
     onInsertText,
+    onCreateStoryWorkflowFromText,
 }: {
     messages: CanvasAssistantMessage[];
     onRetry: (message: CanvasAssistantMessage) => void;
     onInsertImage: (image: CanvasAssistantImage) => void;
     onInsertText: (text: string) => void;
+    onCreateStoryWorkflowFromText?: (text: string) => void;
 }) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
 
@@ -592,6 +595,7 @@ function AssistantMessages({
                         <div className="flex gap-1">
                             <Button shape="circle" size="small" style={{ borderColor: theme.node.stroke }} icon={<RotateCcw className="size-3.5" />} onClick={() => onRetry(message)} title="重试" />
                             {!message.images?.length ? <Button shape="circle" size="small" style={{ borderColor: theme.node.stroke }} icon={<Plus className="size-3.5" />} onClick={() => onInsertText(message.text)} title="插入画布" /> : null}
+                            {!message.images?.length && message.text.trim() && onCreateStoryWorkflowFromText ? <Button shape="circle" size="small" style={{ borderColor: theme.node.stroke }} icon={<Sparkles className="size-3.5" />} onClick={() => onCreateStoryWorkflowFromText(message.text)} title="转故事工作流" /> : null}
                         </div>
                     ) : null}
                     {message.images?.map((image) => (
