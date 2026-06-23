@@ -2,7 +2,7 @@
 
 import { useEffect } from "react";
 import type { ReactNode } from "react";
-import { Copy, FileText, FolderPlus, Grid2x2, Plus, Sparkles, Trash2 } from "lucide-react";
+import { Copy, FileText, FolderPlus, Grid2x2, ImageIcon, Plus, Sparkles, Trash2, Video } from "lucide-react";
 
 import { canvasThemes } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
@@ -15,18 +15,21 @@ type CanvasNodeContextMenuProps = {
     onSaveAsset: () => void;
     onCopyImage: () => void;
     onCopyPrompt: () => void;
+    onCreateImageConfig: () => void;
+    onCreateVideoConfig: () => void;
     onDuplicate: () => void;
     onDelete: () => void;
     onRelayout: () => void;
     onAutoLayout: () => void;
 };
 
-export function CanvasNodeContextMenu({ menu, node, onClose, onSaveAsset, onCopyImage, onCopyPrompt, onDuplicate, onDelete, onRelayout, onAutoLayout }: CanvasNodeContextMenuProps) {
+export function CanvasNodeContextMenu({ menu, node, onClose, onSaveAsset, onCopyImage, onCopyPrompt, onCreateImageConfig, onCreateVideoConfig, onDuplicate, onDelete, onRelayout, onAutoLayout }: CanvasNodeContextMenuProps) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const isNodeMenu = menu.type === "node" && Boolean(node);
     const canSaveAsset = Boolean(node && ((node.type === CanvasNodeType.Text && node.metadata?.content?.trim()) || ((node.type === CanvasNodeType.Image || node.type === CanvasNodeType.Video) && node.metadata?.content)));
     const canCopyImage = Boolean(node?.type === CanvasNodeType.Image && node.metadata?.content);
     const canCopyPrompt = Boolean(node && getNodePromptText(node));
+    const canCreateConfigFromText = Boolean(node?.type === CanvasNodeType.Text && node.metadata?.content?.trim());
 
     useEffect(() => {
         const close = (event: PointerEvent) => {

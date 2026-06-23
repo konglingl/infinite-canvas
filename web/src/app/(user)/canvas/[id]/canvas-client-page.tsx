@@ -1161,6 +1161,52 @@ function InfiniteCanvasPage() {
         [effectiveConfig.canvasImageCount, effectiveConfig.count, effectiveConfig.imageModel, effectiveConfig.model, effectiveConfig.size, getCanvasCenter],
     );
 
+    const createConfigFromTextNode = useCallback(
+        (node: CanvasNodeData, mode: "image" | "video") => {
+            const prompt = (node.metadata?.content || node.metadata?.prompt || "").trim();
+            if (!prompt) {
+                message.warning("文本节点为空，无法创建配置节点");
+                return;
+            }
+            const spec = getNodeSpec(CanvasNodeType.Config);
+            const configNode = createCanvasNode(
+                CanvasNodeType.Config,
+                {
+                    x: node.position.x + node.width + 96 + spec.width / 2,
+                    y: node.position.y + spec.height / 2,
+                },
+                mode === "image"
+                    ? {
+                          generationMode: "image",
+                          generationType: "generation",
+                          model: effectiveConfig.imageModel || effectiveConfig.model,
+                          size: effectiveConfig.size,
+                          count: getGenerationCount(effectiveConfig.canvasImageCount || effectiveConfig.count),
+                          prompt,
+                          content: prompt,
+                      }
+                    : {
+                          generationMode: "video",
+                          model: effectiveConfig.videoModel || effectiveConfig.model,
+                          size: effectiveConfig.size,
+                          seconds: effectiveConfig.videoSeconds,
+                          vquality: effectiveConfig.vquality,
+                          generateAudio: effectiveConfig.videoGenerateAudio,
+                          watermark: effectiveConfig.videoWatermark,
+                          prompt,
+                          content: prompt,
+                      },
+            );
+            configNode.title = mode === "image" ? "文本转生图配置" : "文本转视频配置";
+            setNodes((prev) => [...prev, configNode]);
+            setConnections((prev) => [...prev, createWorkflowConnection(node.id, configNode.id, prev.length + 900)]);
+            setSelectedNodeIds(new Set([configNode.id]));
+            setSelectedConnectionId(null);
+            setDialogNodeId(configNode.id);
+        },
+        [effectiveConfig, message],
+    );
+
     const deleteNodes = useCallback(
         (ids: Set<string>) => {
             if (!ids.size) return;
@@ -3158,6 +3204,16 @@ function InfiniteCanvasPage() {
                         onCopyPrompt={() => {
                             if (!contextMenuNode) return;
                             copyNodePrompt(contextMenuNode);
+                            setContextMenu(null);
+                        }}
+                        onCreateImageConfig={() => {
+                            if (!contextMenuNode) return;
+                            createConfigFromTextNode(contextMenuNode, "image");
+                            setContextMenu(null);
+                        }}
+                        onCreateVideoConfig={() => {
+                            if (!contextMenuNode) return;
+                            createConfigFromTextNode(contextMenuNode, "video");
                             setContextMenu(null);
                         }}
                         onDuplicate={() => {
