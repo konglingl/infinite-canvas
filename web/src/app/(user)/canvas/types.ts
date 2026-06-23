@@ -56,6 +56,10 @@ export type CanvasNodeMetadata = {
     mimeType?: string;
     bytes?: number;
     durationMs?: number;
+    workflowTitle?: string;
+    workflowStage?: string;
+    workflowIndex?: number;
+    workflowTotal?: number;
 };
 
 export type CanvasNodeData = {

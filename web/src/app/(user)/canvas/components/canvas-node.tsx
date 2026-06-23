@@ -111,6 +111,7 @@ export const CanvasNode = React.memo(function CanvasNode({
     const hasAudioContent = data.type === CanvasNodeType.Audio && Boolean(data.metadata?.content);
     const isBatchRoot = data.type === CanvasNodeType.Image && Boolean(data.metadata?.isBatchRoot) && batchCount > 1;
     const isBatchChild = data.type === CanvasNodeType.Image && Boolean(data.metadata?.batchRootId);
+    const workflowStageLabel = getWorkflowStageLabel(data);
     const isActive = isConnectionTarget || isSelected || isFocusRelated;
     const imageBorderColor = isActive ? selectionBlue : isRelated && !isBatchChild ? theme.node.muted : "transparent";
     const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -315,6 +316,7 @@ export const CanvasNode = React.memo(function CanvasNode({
                     />
                 </div>
 
+                {workflowStageLabel ? <WorkflowStageBadge label={workflowStageLabel} title={data.metadata?.workflowTitle} /> : null}
                 {showImageInfo && hasImageContent ? <ImageInfoBar node={data} /> : null}
                 {resourceLabel ? <ResourceLabelBadge reference={resourceLabel} /> : null}
 
@@ -427,6 +429,25 @@ function TextContent({ node, theme, isEditingContent, textareaRef, mentionRefere
                 </div>
             )}
         </div>
+    );
+}
+
+function getWorkflowStageLabel(node: CanvasNodeData) {
+    const stage = node.metadata?.workflowStage;
+    if (!stage) return "";
+    const index = node.metadata?.workflowIndex;
+    const total = node.metadata?.workflowTotal;
+    return index && total ? `${stage} ${index}/${total}` : stage;
+}
+
+function WorkflowStageBadge({ label, title }: { label: string; title?: string }) {
+    return (
+        <span
+            className="pointer-events-none absolute left-2 top-2 z-30 max-w-[70%] truncate rounded-full border border-purple-300/70 bg-purple-500/15 px-2 py-0.5 text-[10px] font-medium text-purple-100 shadow-sm backdrop-blur-md"
+            title={title ? `${title} · ${label}` : label}
+        >
+            {label}
+        </span>
     );
 }
 

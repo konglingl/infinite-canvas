@@ -161,11 +161,18 @@ function buildStoryWorkflowDraft(options: StoryWorkflowOptions, center: Position
     const connections: CanvasConnection[] = [];
     const startX = center.x - 760;
     const startY = center.y - 360;
+    const workflowMeta = (stage: string, index?: number, total?: number): Pick<CanvasNodeMetadata, "workflowTitle" | "workflowStage" | "workflowIndex" | "workflowTotal"> => ({
+        workflowTitle: options.title,
+        workflowStage: stage,
+        workflowIndex: index,
+        workflowTotal: total,
+    });
 
     const summaryNode = createWorkflowNode(CanvasNodeType.Text, "故事总纲", { x: startX, y: startY }, 460, 260, {
         content: `# ${options.title}\n\n${options.story}\n\n统一风格：${options.style}`,
         status: NODE_STATUS_SUCCESS,
         fontSize: 14,
+        ...workflowMeta("总纲"),
     });
     nodes.push(summaryNode);
 
@@ -174,6 +181,7 @@ function buildStoryWorkflowDraft(options: StoryWorkflowOptions, center: Position
             content: `${asset.kind}设定：${asset.name}\n${asset.description}\n统一风格：${options.style}。用于后续分镜保持一致。`,
             status: NODE_STATUS_SUCCESS,
             fontSize: 13,
+            ...workflowMeta("资产设定", index + 1, characters.length + scenes.length),
         }),
     );
     nodes.push(...assetTextNodes);
@@ -184,6 +192,7 @@ function buildStoryWorkflowDraft(options: StoryWorkflowOptions, center: Position
             content: `分镜 ${index + 1}：${shot}`,
             status: NODE_STATUS_SUCCESS,
             fontSize: 13,
+            ...workflowMeta("分镜文案", index + 1, shots.length),
         }),
     );
     nodes.push(...shotTextNodes);
@@ -199,6 +208,7 @@ function buildStoryWorkflowDraft(options: StoryWorkflowOptions, center: Position
             prompt: buildShotPrompt(shots[index] || shotNode.metadata?.content || "", index, options, characters.map((item) => item.name), scenes.map((item) => item.name)),
             content: shots[index] || "",
             status: NODE_STATUS_IDLE,
+            ...workflowMeta("生图配置", index + 1, shots.length),
         }),
     );
     nodes.push(...imageConfigNodes);
@@ -220,6 +230,7 @@ function buildStoryWorkflowDraft(options: StoryWorkflowOptions, center: Position
                 prompt: `基于分镜 ${index + 1} 生成短视频：镜头轻微运动，主体动作自然，保持角色和场景一致。画面描述：${shots[index] || shotNode.metadata?.content || ""}`,
                 content: `由分镜 ${index + 1} 继续生成视频`,
                 status: NODE_STATUS_IDLE,
+                ...workflowMeta("视频配置", index + 1, shots.length),
             }),
         );
         nodes.push(...videoNodes);
