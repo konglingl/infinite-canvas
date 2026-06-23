@@ -51,7 +51,7 @@ const WORKFLOW_TEMPLATES: StoryWorkflowTemplate[] = [
         title: "萌宠舞蹈短视频",
         tag: "竖屏爆款",
         category: "short",
-        description: "参考 MagicalCanvas 的动物跳舞案例，快速生成角色图、动作递进图和视频节点。",
+        description: "快速生成角色图、动作递进图和视频节点，适合萌宠舞蹈短视频。",
         style: "可爱写实短视频，竖屏构图，明亮室内光线，夸张但自然的动作，适合社媒传播",
         shotCount: 5,
         createVideoNodes: true,
@@ -150,11 +150,11 @@ export function StoryWorkflowModal({ open, onCancel, onCreate }: StoryWorkflowMo
         >
             <div className="space-y-4">
                 <div className="rounded-xl border border-purple-200 bg-purple-50 px-3 py-2 text-sm text-purple-900">
-                    借鉴 MagicalCanvas 的“一键创作”思路：把小说、剧本或创意拆成总纲、角色资产、场景资产、分镜生图配置和视频配置节点，自动连线排版。生成后可继续手动微调并批量生图。
+                    输入小说、剧本或创意后，可生成总纲、角色资产、场景资产、分镜生图配置和视频配置节点，并自动连线排版。生成后可继续手动微调并批量生图。
                 </div>
                 <div className="space-y-2">
                     <div className="flex items-center justify-between gap-2">
-                        <div className="text-sm font-medium text-foreground">MagicalCanvas 灵感模板</div>
+                        <div className="text-sm font-medium text-foreground">灵感模板</div>
                         <div className="text-xs text-muted-foreground">点击后自动填入标题、故事、风格和分镜数量</div>
                     </div>
                     <div className="flex flex-col gap-2 rounded-xl border border-border/70 bg-background/70 p-2 md:flex-row md:items-center md:justify-between">
