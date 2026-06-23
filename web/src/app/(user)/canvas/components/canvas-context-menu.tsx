@@ -24,13 +24,14 @@ type CanvasNodeContextMenuProps = {
     onRelayoutWorkflow: () => void;
     onSelectWorkflowStage: () => void;
     onRelayoutWorkflowStage: () => void;
+    onToggleWorkflowStageCollapse: () => void;
     onDuplicate: () => void;
     onDelete: () => void;
     onRelayout: () => void;
     onAutoLayout: () => void;
 };
 
-export function CanvasNodeContextMenu({ menu, node, onClose, onSaveAsset, onCopyImage, onCopyPrompt, onCopyWorkflowPrompts, onCopyWorkflowStagePrompts, onExportWorkflowMarkdown, onCreateImageConfig, onCreateVideoConfig, onSelectWorkflow, onRelayoutWorkflow, onSelectWorkflowStage, onRelayoutWorkflowStage, onDuplicate, onDelete, onRelayout, onAutoLayout }: CanvasNodeContextMenuProps) {
+export function CanvasNodeContextMenu({ menu, node, onClose, onSaveAsset, onCopyImage, onCopyPrompt, onCopyWorkflowPrompts, onCopyWorkflowStagePrompts, onExportWorkflowMarkdown, onCreateImageConfig, onCreateVideoConfig, onSelectWorkflow, onRelayoutWorkflow, onSelectWorkflowStage, onRelayoutWorkflowStage, onToggleWorkflowStageCollapse, onDuplicate, onDelete, onRelayout, onAutoLayout }: CanvasNodeContextMenuProps) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const isNodeMenu = menu.type === "node" && Boolean(node);
     const canSaveAsset = Boolean(node && ((node.type === CanvasNodeType.Text && node.metadata?.content?.trim()) || ((node.type === CanvasNodeType.Image || node.type === CanvasNodeType.Video) && node.metadata?.content)));
@@ -39,6 +40,7 @@ export function CanvasNodeContextMenu({ menu, node, onClose, onSaveAsset, onCopy
     const canCreateConfigFromText = Boolean(node?.type === CanvasNodeType.Text && node.metadata?.content?.trim());
     const canSelectWorkflow = Boolean(node?.metadata?.workflowTitle);
     const canSelectWorkflowStage = Boolean(node?.metadata?.workflowStage && node.metadata?.workflowTitle);
+    const workflowStageCollapseLabel = node?.metadata?.workflowStageCollapsed ? "展开同阶段节点" : "折叠同阶段节点";
 
     useEffect(() => {
         const close = (event: PointerEvent) => {
@@ -70,6 +72,7 @@ export function CanvasNodeContextMenu({ menu, node, onClose, onSaveAsset, onCopy
                     <MenuButton icon={<Grid2x2 className="size-4" />} label="整理同工作流节点" onClick={onRelayoutWorkflow} disabled={!canSelectWorkflow} />
                     <MenuButton icon={<Grid2x2 className="size-4" />} label="选择同阶段节点" onClick={onSelectWorkflowStage} disabled={!canSelectWorkflowStage} />
                     <MenuButton icon={<Grid2x2 className="size-4" />} label="整理同阶段节点" onClick={onRelayoutWorkflowStage} disabled={!canSelectWorkflowStage} />
+                    <MenuButton icon={<Grid2x2 className="size-4" />} label={workflowStageCollapseLabel} onClick={onToggleWorkflowStageCollapse} disabled={!canSelectWorkflowStage} />
                     <MenuButton icon={<Plus className="size-4" />} label="创建副本" onClick={onDuplicate} />
                     <MenuButton icon={<Trash2 className="size-4" />} label="删除" onClick={onDelete} danger />
                     <MenuButton icon={<Grid2x2 className="size-4" />} label="重新布局 / 整理画布" onClick={onRelayout} />

@@ -60,6 +60,7 @@ export type CanvasNodeMetadata = {
     workflowStage?: string;
     workflowIndex?: number;
     workflowTotal?: number;
+    workflowStageCollapsed?: boolean;
 };
 
 export type CanvasNodeData = {

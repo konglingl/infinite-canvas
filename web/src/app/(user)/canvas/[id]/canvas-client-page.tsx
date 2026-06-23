@@ -1002,8 +1002,9 @@ function InfiniteCanvasPage() {
             let bestNodeId: string | null = null;
             let bestPriority = Number.POSITIVE_INFINITY;
 
+            const hiddenIds = buildHiddenCanvasNodeIds(nodesRef.current, connectionsRef.current, collapsingBatchIds);
             [...nodesRef.current]
-                .filter((node) => !isHiddenBatchChild(node, nodesRef.current))
+                .filter((node) => !hiddenIds.has(node.id))
                 .reverse()
                 .forEach((node) => {
                     const anchor = getConnectionTargetAnchor(node, current);
@@ -1026,10 +1027,10 @@ function InfiniteCanvasPage() {
 
             return { nodeId: bestNodeId, isNearNode };
         },
-        [screenToCanvas],
+        [collapsingBatchIds, screenToCanvas],
     );
 
-    const hiddenBatchNodeIds = useMemo(() => buildHiddenBatchNodeIds(nodes, connections, collapsingBatchIds), [collapsingBatchIds, connections, nodes]);
+    const hiddenNodeIds = useMemo(() => buildHiddenCanvasNodeIds(nodes, connections, collapsingBatchIds), [collapsingBatchIds, connections, nodes]);
 
     const visibleNodes = useMemo(() => {
         const padding = 280;
@@ -1041,8 +1042,8 @@ function InfiniteCanvasPage() {
         const viewRight = viewLeft + width / viewport.k + padding * 2;
         const viewBottom = viewTop + height / viewport.k + padding * 2;
 
-        return nodes.filter((node) => !hiddenBatchNodeIds.has(node.id) && node.position.x + node.width > viewLeft && node.position.x < viewRight && node.position.y + node.height > viewTop && node.position.y < viewBottom);
-    }, [hiddenBatchNodeIds, nodes, size.height, size.width, viewport.k, viewport.x, viewport.y]);
+        return nodes.filter((node) => !hiddenNodeIds.has(node.id) && node.position.x + node.width > viewLeft && node.position.x < viewRight && node.position.y + node.height > viewTop && node.position.y < viewBottom);
+    }, [hiddenNodeIds, nodes, size.height, size.width, viewport.k, viewport.x, viewport.y]);
 
     const nodeById = useMemo(() => new Map(nodes.map((node) => [node.id, node])), [nodes]);
     const toolbarNode = toolbarNodeId ? nodeById.get(toolbarNodeId) || null : null;
@@ -1637,8 +1638,9 @@ function InfiniteCanvasPage() {
             const rectH = Math.abs(world.y - currentSelection.startWorldY);
             const nextSelected = new Set<string>(currentSelection.additive ? currentSelection.initialSelectedNodeIds : []);
 
+            const hiddenIds = buildHiddenCanvasNodeIds(nodesRef.current, connectionsRef.current, collapsingBatchIds);
             nodesRef.current
-                .filter((node) => !isHiddenBatchChild(node, nodesRef.current))
+                .filter((node) => !hiddenIds.has(node.id))
                 .forEach((node) => {
                     const intersects = rectX < node.position.x + node.width && rectX + rectW > node.position.x && rectY < node.position.y + node.height && rectY + rectH > node.position.y;
 
@@ -1650,7 +1652,7 @@ function InfiniteCanvasPage() {
             setSelectionBox(nextSelectionBox);
             setSelectedNodeIds(nextSelected);
         },
-        [screenToCanvas],
+        [collapsingBatchIds, screenToCanvas],
     );
 
     const handleGlobalMouseUp = useCallback(
@@ -2125,7 +2127,7 @@ function InfiniteCanvasPage() {
         (nodeId: string) => {
             const currentNodes = nodesRef.current;
             const currentConnections = connectionsRef.current;
-            const hiddenIds = buildHiddenBatchNodeIds(currentNodes, currentConnections, collapsingBatchIds);
+            const hiddenIds = buildHiddenCanvasNodeIds(currentNodes, currentConnections, collapsingBatchIds);
             const selectedIds = selectedNodeIdsRef.current;
             const targetIds = selectedIds.has(nodeId) && selectedIds.size > 1 ? new Set([...selectedIds].filter((id) => !hiddenIds.has(id))) : collectConnectedCanvasNodeIds(nodeId, currentNodes.filter((node) => !hiddenIds.has(node.id)), currentConnections);
             const targetNodes = currentNodes.filter((node) => targetIds.has(node.id));
@@ -2206,10 +2208,35 @@ function InfiniteCanvasPage() {
         [message],
     );
 
+    const toggleWorkflowStageCollapse = useCallback(
+        (node: CanvasNodeData) => {
+            const { workflowStage, workflowTitle } = node.metadata || {};
+            if (!workflowStage || !workflowTitle) {
+                message.info("当前节点不属于故事工作流阶段");
+                return;
+            }
+            const collapsed = !node.metadata?.workflowStageCollapsed;
+            setNodes((prev) =>
+                prev.map((item) => {
+                    if (item.metadata?.workflowStage !== workflowStage || item.metadata?.workflowTitle !== workflowTitle) return item;
+                    const nextCollapsed = item.id === node.id ? collapsed : undefined;
+                    if (item.metadata?.workflowStageCollapsed === nextCollapsed) return item;
+                    return { ...item, metadata: { ...item.metadata, workflowStageCollapsed: nextCollapsed } };
+                }),
+            );
+            setSelectedNodeIds(new Set([node.id]));
+            setSelectedConnectionId(null);
+            setDialogNodeId(null);
+            setContextMenu(null);
+            message.success(collapsed ? "已折叠同阶段节点，展开后位置保持不变" : "已展开同阶段节点");
+        },
+        [message],
+    );
+
     const autoLayoutCanvas = useCallback(() => {
         const currentNodes = nodesRef.current;
         const currentConnections = connectionsRef.current;
-        const hiddenIds = buildHiddenBatchNodeIds(currentNodes, currentConnections, collapsingBatchIds);
+        const hiddenIds = buildHiddenCanvasNodeIds(currentNodes, currentConnections, collapsingBatchIds);
         const targetNodes = currentNodes.filter((node) => !hiddenIds.has(node.id));
         if (targetNodes.length <= 1) {
             message.info("画布暂无可整理的节点");
@@ -3127,7 +3154,7 @@ function InfiniteCanvasPage() {
                             .filter((connection) => {
                                 const from = nodeById.get(connection.fromNodeId);
                                 const to = nodeById.get(connection.toNodeId);
-                                return Boolean(from && to && !hiddenBatchNodeIds.has(from.id) && !hiddenBatchNodeIds.has(to.id));
+                                return Boolean(from && to && !hiddenNodeIds.has(from.id) && !hiddenNodeIds.has(to.id));
                             })
                             .map((connection) => {
                                 const from = nodeById.get(connection.fromNodeId);
@@ -3390,6 +3417,10 @@ function InfiniteCanvasPage() {
                         onRelayoutWorkflowStage={() => {
                             if (!contextMenuNode) return;
                             relayoutWorkflowStage(contextMenuNode);
+                        }}
+                        onToggleWorkflowStageCollapse={() => {
+                            if (!contextMenuNode) return;
+                            toggleWorkflowStageCollapse(contextMenuNode);
                         }}
                         onDuplicate={() => {
                             if (contextMenu.type !== "node") return;
@@ -3905,6 +3936,12 @@ function isAudioFile(file: File) {
     return file.type.startsWith("audio/") || /\.(mp3|wav)$/i.test(file.name);
 }
 
+function buildHiddenCanvasNodeIds(nodes: CanvasNodeData[], connections: CanvasConnection[], collapsingBatchIds?: Set<string>) {
+    const hidden = buildHiddenBatchNodeIds(nodes, connections, collapsingBatchIds);
+    buildHiddenWorkflowStageNodeIds(nodes).forEach((nodeId) => hidden.add(nodeId));
+    return hidden;
+}
+
 function buildHiddenBatchNodeIds(nodes: CanvasNodeData[], connections: CanvasConnection[], collapsingBatchIds?: Set<string>) {
     const hidden = new Set<string>();
     const nodeById = new Map(nodes.map((node) => [node.id, node]));
@@ -3937,6 +3974,25 @@ function buildHiddenBatchNodeIds(nodes: CanvasNodeData[], connections: CanvasCon
         }
     });
 
+    return hidden;
+}
+
+function buildHiddenWorkflowStageNodeIds(nodes: CanvasNodeData[]) {
+    const hidden = new Set<string>();
+    const groups = new Map<string, CanvasNodeData[]>();
+    nodes.forEach((node) => {
+        const { workflowStage, workflowTitle } = node.metadata || {};
+        if (!workflowStage || !workflowTitle) return;
+        const key = `${workflowTitle}::${workflowStage}`;
+        groups.set(key, [...(groups.get(key) || []), node]);
+    });
+    groups.forEach((groupNodes) => {
+        const marker = [...groupNodes].sort(sortWorkflowNodesForPromptCopy).find((node) => node.metadata?.workflowStageCollapsed);
+        if (!marker) return;
+        groupNodes.forEach((node) => {
+            if (node.id !== marker.id) hidden.add(node.id);
+        });
+    });
     return hidden;
 }
 
