@@ -18,13 +18,14 @@ type CanvasNodeContextMenuProps = {
     onCreateImageConfig: () => void;
     onCreateVideoConfig: () => void;
     onSelectWorkflowStage: () => void;
+    onRelayoutWorkflowStage: () => void;
     onDuplicate: () => void;
     onDelete: () => void;
     onRelayout: () => void;
     onAutoLayout: () => void;
 };
 
-export function CanvasNodeContextMenu({ menu, node, onClose, onSaveAsset, onCopyImage, onCopyPrompt, onCreateImageConfig, onCreateVideoConfig, onSelectWorkflowStage, onDuplicate, onDelete, onRelayout, onAutoLayout }: CanvasNodeContextMenuProps) {
+export function CanvasNodeContextMenu({ menu, node, onClose, onSaveAsset, onCopyImage, onCopyPrompt, onCreateImageConfig, onCreateVideoConfig, onSelectWorkflowStage, onRelayoutWorkflowStage, onDuplicate, onDelete, onRelayout, onAutoLayout }: CanvasNodeContextMenuProps) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const isNodeMenu = menu.type === "node" && Boolean(node);
     const canSaveAsset = Boolean(node && ((node.type === CanvasNodeType.Text && node.metadata?.content?.trim()) || ((node.type === CanvasNodeType.Image || node.type === CanvasNodeType.Video) && node.metadata?.content)));
@@ -57,6 +58,7 @@ export function CanvasNodeContextMenu({ menu, node, onClose, onSaveAsset, onCopy
                     <MenuButton icon={<ImageIcon className="size-4" />} label="转生图配置" onClick={onCreateImageConfig} disabled={!canCreateConfigFromText} />
                     <MenuButton icon={<Video className="size-4" />} label="转视频配置" onClick={onCreateVideoConfig} disabled={!canCreateConfigFromText} />
                     <MenuButton icon={<Grid2x2 className="size-4" />} label="选择同阶段节点" onClick={onSelectWorkflowStage} disabled={!canSelectWorkflowStage} />
+                    <MenuButton icon={<Grid2x2 className="size-4" />} label="整理同阶段节点" onClick={onRelayoutWorkflowStage} disabled={!canSelectWorkflowStage} />
                     <MenuButton icon={<Plus className="size-4" />} label="创建副本" onClick={onDuplicate} />
                     <MenuButton icon={<Trash2 className="size-4" />} label="删除" onClick={onDelete} danger />
                     <MenuButton icon={<Grid2x2 className="size-4" />} label="重新布局 / 整理画布" onClick={onRelayout} />

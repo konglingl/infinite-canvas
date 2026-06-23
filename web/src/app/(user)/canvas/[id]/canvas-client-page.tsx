@@ -2072,6 +2072,40 @@ function InfiniteCanvasPage() {
         [collapsingBatchIds, message],
     );
 
+    const relayoutWorkflowStage = useCallback(
+        (node: CanvasNodeData) => {
+            const { workflowStage, workflowTitle } = node.metadata || {};
+            if (!workflowStage || !workflowTitle) {
+                message.info("当前节点不属于故事工作流阶段");
+                return;
+            }
+
+            const stageNodes = nodesRef.current
+                .filter((item) => item.metadata?.workflowStage === workflowStage && item.metadata?.workflowTitle === workflowTitle)
+                .sort((a, b) => (a.metadata?.workflowIndex ?? Number.MAX_SAFE_INTEGER) - (b.metadata?.workflowIndex ?? Number.MAX_SAFE_INTEGER) || sortCanvasNodesForLayout(a, b));
+            if (stageNodes.length <= 1) {
+                message.info("当前阶段暂无可整理的其他节点");
+                return;
+            }
+
+            const bounds = getCanvasNodeBounds(stageNodes);
+            const maxWidth = Math.max(...stageNodes.map((item) => item.width));
+            let currentY = bounds.top;
+            const positions = new Map<string, Position>();
+            stageNodes.forEach((item) => {
+                positions.set(item.id, { x: bounds.left + (maxWidth - item.width) / 2, y: currentY });
+                currentY += item.height + CANVAS_AUTO_LAYOUT_GAP_Y;
+            });
+            setNodes((prev) => prev.map((item) => (positions.has(item.id) ? { ...item, position: positions.get(item.id)! } : item)));
+            setSelectedNodeIds(new Set(stageNodes.map((item) => item.id)));
+            setSelectedConnectionId(null);
+            setDialogNodeId(null);
+            setContextMenu(null);
+            message.success(`已整理 ${stageNodes.length} 个同阶段节点`);
+        },
+        [message],
+    );
+
     const autoLayoutCanvas = useCallback(() => {
         const currentNodes = nodesRef.current;
         const currentConnections = connectionsRef.current;
@@ -3224,6 +3258,10 @@ function InfiniteCanvasPage() {
                             setSelectedConnectionId(null);
                             setContextMenu(null);
                             message.success(`已选中 ${sameStageIds.length} 个同阶段节点`);
+                        }}
+                        onRelayoutWorkflowStage={() => {
+                            if (!contextMenuNode) return;
+                            relayoutWorkflowStage(contextMenuNode);
                         }}
                         onDuplicate={() => {
                             if (contextMenu.type !== "node") return;
