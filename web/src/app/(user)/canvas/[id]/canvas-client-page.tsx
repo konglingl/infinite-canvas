@@ -3250,6 +3250,15 @@ function InfiniteCanvasPage() {
                             createConfigFromTextNode(contextMenuNode, "video");
                             setContextMenu(null);
                         }}
+                        onSelectWorkflow={() => {
+                            if (!contextMenuNode?.metadata?.workflowTitle) return;
+                            const { workflowTitle } = contextMenuNode.metadata;
+                            const workflowIds = nodesRef.current.filter((node) => node.metadata?.workflowTitle === workflowTitle).map((node) => node.id);
+                            setSelectedNodeIds(new Set(workflowIds));
+                            setSelectedConnectionId(null);
+                            setContextMenu(null);
+                            message.success(`已选中 ${workflowIds.length} 个同工作流节点`);
+                        }}
                         onSelectWorkflowStage={() => {
                             if (!contextMenuNode?.metadata?.workflowStage || !contextMenuNode.metadata.workflowTitle) return;
                             const { workflowStage, workflowTitle } = contextMenuNode.metadata;

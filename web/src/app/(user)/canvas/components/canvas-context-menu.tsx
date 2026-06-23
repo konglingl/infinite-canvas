@@ -17,6 +17,7 @@ type CanvasNodeContextMenuProps = {
     onCopyPrompt: () => void;
     onCreateImageConfig: () => void;
     onCreateVideoConfig: () => void;
+    onSelectWorkflow: () => void;
     onSelectWorkflowStage: () => void;
     onRelayoutWorkflowStage: () => void;
     onDuplicate: () => void;
@@ -25,13 +26,14 @@ type CanvasNodeContextMenuProps = {
     onAutoLayout: () => void;
 };
 
-export function CanvasNodeContextMenu({ menu, node, onClose, onSaveAsset, onCopyImage, onCopyPrompt, onCreateImageConfig, onCreateVideoConfig, onSelectWorkflowStage, onRelayoutWorkflowStage, onDuplicate, onDelete, onRelayout, onAutoLayout }: CanvasNodeContextMenuProps) {
+export function CanvasNodeContextMenu({ menu, node, onClose, onSaveAsset, onCopyImage, onCopyPrompt, onCreateImageConfig, onCreateVideoConfig, onSelectWorkflow, onSelectWorkflowStage, onRelayoutWorkflowStage, onDuplicate, onDelete, onRelayout, onAutoLayout }: CanvasNodeContextMenuProps) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const isNodeMenu = menu.type === "node" && Boolean(node);
     const canSaveAsset = Boolean(node && ((node.type === CanvasNodeType.Text && node.metadata?.content?.trim()) || ((node.type === CanvasNodeType.Image || node.type === CanvasNodeType.Video) && node.metadata?.content)));
     const canCopyImage = Boolean(node?.type === CanvasNodeType.Image && node.metadata?.content);
     const canCopyPrompt = Boolean(node && getNodePromptText(node));
     const canCreateConfigFromText = Boolean(node?.type === CanvasNodeType.Text && node.metadata?.content?.trim());
+    const canSelectWorkflow = Boolean(node?.metadata?.workflowTitle);
     const canSelectWorkflowStage = Boolean(node?.metadata?.workflowStage && node.metadata?.workflowTitle);
 
     useEffect(() => {
@@ -57,6 +59,7 @@ export function CanvasNodeContextMenu({ menu, node, onClose, onSaveAsset, onCopy
                     <MenuButton icon={<FileText className="size-4" />} label="复制提示词" onClick={onCopyPrompt} disabled={!canCopyPrompt} />
                     <MenuButton icon={<ImageIcon className="size-4" />} label="转生图配置" onClick={onCreateImageConfig} disabled={!canCreateConfigFromText} />
                     <MenuButton icon={<Video className="size-4" />} label="转视频配置" onClick={onCreateVideoConfig} disabled={!canCreateConfigFromText} />
+                    <MenuButton icon={<Grid2x2 className="size-4" />} label="选择同工作流节点" onClick={onSelectWorkflow} disabled={!canSelectWorkflow} />
                     <MenuButton icon={<Grid2x2 className="size-4" />} label="选择同阶段节点" onClick={onSelectWorkflowStage} disabled={!canSelectWorkflowStage} />
                     <MenuButton icon={<Grid2x2 className="size-4" />} label="整理同阶段节点" onClick={onRelayoutWorkflowStage} disabled={!canSelectWorkflowStage} />
                     <MenuButton icon={<Plus className="size-4" />} label="创建副本" onClick={onDuplicate} />
