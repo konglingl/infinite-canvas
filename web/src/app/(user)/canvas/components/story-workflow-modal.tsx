@@ -1,8 +1,10 @@
-"use client";
+﻿"use client";
 
 import { useMemo, useState } from "react";
 import { Button, Checkbox, Form, Input, InputNumber, Modal, Select, Space, Tag } from "antd";
 import { Sparkles } from "lucide-react";
+
+import type { CanvasStoryWorkflowTemplate } from "../types";
 
 export type StoryWorkflowOptions = {
     title: string;
@@ -15,8 +17,25 @@ export type StoryWorkflowOptions = {
 
 type StoryWorkflowModalProps = {
     open: boolean;
+    customTemplates?: CanvasStoryWorkflowTemplate[];
+    onCustomTemplatesChange?: (templates: CanvasStoryWorkflowTemplate[]) => void;
     onCancel: () => void;
     onCreate: (options: StoryWorkflowOptions) => void;
+};
+
+type StoryWorkflowTemplate = {
+    id: string;
+    title: string;
+    workflowTitle?: string;
+    tag: string;
+    category: string;
+    description: string;
+    story: string;
+    style: string;
+    shotCount: number;
+    createVideoNodes: boolean;
+    useAiSplit: boolean;
+    custom?: boolean;
 };
 
 const STYLE_OPTIONS = [
@@ -27,27 +46,18 @@ const STYLE_OPTIONS = [
     { label: "产品广告", value: "高端产品广告摄影，干净背景，商业布光，突出主体质感" },
 ];
 
-type StoryWorkflowTemplate = {
-    title: string;
-    tag: string;
-    category: string;
-    description: string;
-    story: string;
-    style: string;
-    shotCount: number;
-    createVideoNodes: boolean;
-};
-
 const TEMPLATE_CATEGORIES = [
     { key: "all", label: "全部" },
     { key: "short", label: "短视频" },
     { key: "character", label: "角色叙事" },
     { key: "motion", label: "运动镜头" },
     { key: "commerce", label: "商业广告" },
+    { key: "custom", label: "自定义" },
 ];
 
 const WORKFLOW_TEMPLATES: StoryWorkflowTemplate[] = [
     {
+        id: "preset-pet-dance",
         title: "萌宠舞蹈短视频",
         tag: "竖屏爆款",
         category: "short",
@@ -55,9 +65,11 @@ const WORKFLOW_TEMPLATES: StoryWorkflowTemplate[] = [
         style: "可爱写实短视频，竖屏构图，明亮室内光线，夸张但自然的动作，适合社媒传播",
         shotCount: 5,
         createVideoNodes: true,
+        useAiSplit: true,
         story: "一只拟人化的小猫站在餐桌中央，周围是被轻轻挪开的餐具。它先好奇地观察镜头，然后伴随轻快节奏做出左右摆手、转身、踢腿和定格 pose。画面要保留猫咪可爱表情、干净桌面和连续舞蹈动作，最后生成适合竖屏短视频的图生视频镜头。",
     },
     {
+        id: "preset-film-set",
         title: "电影片场探访",
         tag: "角色一致",
         category: "character",
@@ -65,9 +77,11 @@ const WORKFLOW_TEMPLATES: StoryWorkflowTemplate[] = [
         style: "电影感写实，真实摄影质感，柔和片场灯光，角色面部一致，背景有轻微景深",
         shotCount: 6,
         createVideoNodes: true,
+        useAiSplit: true,
         story: "主角收到一张神秘通行证，进入一座复古电影片场。先生成主角正面设定照，再生成主角在片场门口自拍、与工作人员交流、穿过布景街道、站在聚光灯下回望镜头的连续画面。整体像真实幕后花絮，氛围温暖、怀旧、有故事感。",
     },
     {
+        id: "preset-pov-racing",
         title: "第一视角竞速",
         tag: "运动镜头",
         category: "motion",
@@ -75,9 +89,11 @@ const WORKFLOW_TEMPLATES: StoryWorkflowTemplate[] = [
         style: "高速运动摄影，第一视角，强动态模糊，低机位广角，电影级色彩和速度感",
         shotCount: 6,
         createVideoNodes: true,
+        useAiSplit: true,
         story: "一名骑手驾驶未来感摩托穿越海岸公路。镜头从头盔第一视角出发，依次展示仪表盘特写、轮胎贴地过弯、道路两侧风景高速掠过、无人机俯拍跟随、隧道光影穿梭和冲出终点的瞬间。需要把每个镜头拆成可生图的画面提示，并附带适合图生视频的运动描述。",
     },
     {
+        id: "preset-product-ad",
         title: "产品广告分镜",
         tag: "商业广告",
         category: "commerce",
@@ -85,11 +101,13 @@ const WORKFLOW_TEMPLATES: StoryWorkflowTemplate[] = [
         style: "高端产品广告摄影，干净背景，商业布光，微距材质细节，简洁高级",
         shotCount: 5,
         createVideoNodes: false,
+        useAiSplit: true,
         story: "为一款极简智能香薰音箱制作广告分镜。先展示产品悬浮在柔和渐变背景中的主视觉，再展示金属旋钮、织物网面和雾化光效细节，随后进入卧室、书桌、瑜伽空间三个使用场景，最后生成带品牌感的收尾海报画面。重点突出安静、治愈、智能和高级质感。",
     },
 ];
 
-export function StoryWorkflowModal({ open, onCancel, onCreate }: StoryWorkflowModalProps) {
+
+export function StoryWorkflowModal({ open, customTemplates = [], onCustomTemplatesChange, onCancel, onCreate }: StoryWorkflowModalProps) {
     const [title, setTitle] = useState("故事工作流");
     const [story, setStory] = useState("");
     const [style, setStyle] = useState(STYLE_OPTIONS[0].value);
@@ -98,26 +116,74 @@ export function StoryWorkflowModal({ open, onCancel, onCreate }: StoryWorkflowMo
     const [useAiSplit, setUseAiSplit] = useState(true);
     const [templateCategory, setTemplateCategory] = useState("all");
     const [templateKeyword, setTemplateKeyword] = useState("");
-    const selectedTemplate = useMemo(() => WORKFLOW_TEMPLATES.find((template) => template.title === title && template.story === story) || null, [story, title]);
+    const [templateName, setTemplateName] = useState("");
+    const normalizedCustomTemplates = useMemo(
+        () =>
+            customTemplates.map<StoryWorkflowTemplate>((template) => ({
+                id: template.id,
+                title: template.name,
+                workflowTitle: template.title,
+                tag: "自定义",
+                category: "custom",
+                description: template.title ? `工作流：${template.title}` : "自定义模板",
+                story: template.story,
+                style: template.style,
+                shotCount: template.shotCount,
+                createVideoNodes: template.createVideoNodes,
+                useAiSplit: template.useAiSplit,
+                custom: true,
+            })),
+        [customTemplates],
+    );
+    const allTemplates = useMemo(() => [...WORKFLOW_TEMPLATES, ...normalizedCustomTemplates], [normalizedCustomTemplates]);
+    const selectedTemplate = useMemo(() => allTemplates.find((template) => (template.workflowTitle || template.title) === title && template.story === story) || null, [allTemplates, story, title]);
     const expectedNodeCount = useMemo(() => 1 + 8 + shotCount * (createVideoNodes ? 3 : 2), [createVideoNodes, shotCount]);
     const filteredTemplates = useMemo(() => {
         const keyword = templateKeyword.trim().toLowerCase();
-        return WORKFLOW_TEMPLATES.filter((template) => {
+        return allTemplates.filter((template) => {
             const categoryMatched = templateCategory === "all" || template.category === templateCategory;
             if (!categoryMatched) return false;
             if (!keyword) return true;
             return [template.title, template.tag, template.description, template.story, template.style].join(" ").toLowerCase().includes(keyword);
         });
-    }, [templateCategory, templateKeyword]);
+    }, [allTemplates, templateCategory, templateKeyword]);
     const wordCount = useMemo(() => story.trim().length, [story]);
 
     const applyTemplate = (template: StoryWorkflowTemplate) => {
-        setTitle(template.title);
+        setTitle(template.workflowTitle || template.title);
         setStory(template.story);
         setStyle(template.style);
         setShotCount(template.shotCount);
         setCreateVideoNodes(template.createVideoNodes);
-        setUseAiSplit(true);
+        setUseAiSplit(template.useAiSplit);
+        if (template.custom) setTemplateName(template.title);
+    };
+
+    const saveCustomTemplate = () => {
+        const trimmedStory = story.trim();
+        if (!trimmedStory || !onCustomTemplatesChange) return;
+        const now = new Date().toISOString();
+        const name = (templateName.trim() || title.trim() || "自定义模板").slice(0, 40);
+        const existing = customTemplates.find((template) => template.name === name);
+        const nextTemplate: CanvasStoryWorkflowTemplate = {
+            id: existing?.id || `story-template-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+            name,
+            title: title.trim() || name,
+            story: trimmedStory,
+            style,
+            shotCount,
+            createVideoNodes,
+            useAiSplit,
+            createdAt: existing?.createdAt || now,
+            updatedAt: now,
+        };
+        onCustomTemplatesChange(existing ? customTemplates.map((template) => (template.id === existing.id ? nextTemplate : template)) : [nextTemplate, ...customTemplates]);
+        setTemplateCategory("custom");
+        setTemplateName(name);
+    };
+
+    const deleteCustomTemplate = (templateId: string) => {
+        onCustomTemplatesChange?.(customTemplates.filter((template) => template.id !== templateId));
     };
 
     const submit = () => {
@@ -169,6 +235,7 @@ export function StoryWorkflowModal({ open, onCancel, onCreate }: StoryWorkflowMo
                                         className={`rounded-full border px-2.5 py-1 text-xs transition ${active ? "border-purple-400 bg-purple-100 text-purple-800" : "border-border bg-background text-muted-foreground hover:border-purple-300 hover:text-purple-700"}`}
                                     >
                                         {category.label}
+                                        {category.key === "custom" && customTemplates.length ? ` ${customTemplates.length}` : ""}
                                     </button>
                                 );
                             })}
@@ -181,15 +248,21 @@ export function StoryWorkflowModal({ open, onCancel, onCreate }: StoryWorkflowMo
                             className="md:max-w-[260px]"
                         />
                     </div>
+                    <div className="flex flex-col gap-2 rounded-xl border border-purple-200/70 bg-purple-50/50 p-2 md:flex-row md:items-center">
+                        <Input value={templateName} maxLength={40} onChange={(event) => setTemplateName(event.target.value)} placeholder="自定义模板名称，例如：短剧带货模板" />
+                        <Button disabled={!story.trim() || !onCustomTemplatesChange} onClick={saveCustomTemplate}>
+                            保存为自定义模板
+                        </Button>
+                    </div>
                     <div className="grid gap-2 md:grid-cols-2">
                         {filteredTemplates.length === 0 ? (
                             <div className="rounded-xl border border-dashed border-purple-200 bg-purple-50/60 p-4 text-center text-xs text-purple-800 md:col-span-2">没有匹配的模板，试试切换分类或清空搜索。</div>
                         ) : null}
                         {filteredTemplates.map((template) => {
-                            const active = template.title === selectedTemplate?.title;
+                            const active = template.id === selectedTemplate?.id;
                             return (
                                 <button
-                                    key={template.title}
+                                    key={template.id}
                                     type="button"
                                     aria-pressed={active}
                                     onClick={() => applyTemplate(template)}
@@ -197,11 +270,31 @@ export function StoryWorkflowModal({ open, onCancel, onCreate }: StoryWorkflowMo
                                 >
                                     <div className="flex items-center justify-between gap-2">
                                         <span className="text-sm font-medium text-foreground">{template.title}</span>
-                                        <Tag color={active ? "magenta" : "purple"}>{template.tag}</Tag>
+                                        <Tag color={active ? "magenta" : template.custom ? "cyan" : "purple"}>{template.tag}</Tag>
                                     </div>
                                     <p className="mt-1 text-xs leading-5 text-muted-foreground">{template.description}</p>
-                                    <div className="mt-2 text-xs text-purple-700">
-                                        {template.shotCount} 个分镜 · {template.createVideoNodes ? "含视频节点" : "仅生图节点"}
+                                    <div className="mt-2 flex items-center justify-between gap-2 text-xs text-purple-700">
+                                        <span>{template.shotCount} 个分镜 · {template.createVideoNodes ? "含视频节点" : "仅生图节点"}</span>
+                                        {template.custom ? (
+                                            <span
+                                                role="button"
+                                                tabIndex={0}
+                                                className="text-red-500 hover:text-red-600"
+                                                onClick={(event) => {
+                                                    event.stopPropagation();
+                                                    deleteCustomTemplate(template.id);
+                                                }}
+                                                onKeyDown={(event) => {
+                                                    if (event.key === "Enter" || event.key === " ") {
+                                                        event.preventDefault();
+                                                        event.stopPropagation();
+                                                        deleteCustomTemplate(template.id);
+                                                    }
+                                                }}
+                                            >
+                                                删除
+                                            </span>
+                                        ) : null}
                                     </div>
                                 </button>
                             );
@@ -215,6 +308,8 @@ export function StoryWorkflowModal({ open, onCancel, onCreate }: StoryWorkflowMo
                         <span>{shotCount} 个分镜</span>
                         <span>·</span>
                         <span>{createVideoNodes ? "含视频节点" : "仅生图节点"}</span>
+                        <span>·</span>
+                        <span>{useAiSplit ? "AI 拆分" : "本地拆分"}</span>
                         <span>·</span>
                         <span>预计 {expectedNodeCount} 个节点</span>
                     </div>

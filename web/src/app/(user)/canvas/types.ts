@@ -113,6 +113,19 @@ export type CanvasAssistantSession = {
     updatedAt: string;
 };
 
+export type CanvasStoryWorkflowTemplate = {
+    id: string;
+    name: string;
+    title: string;
+    story: string;
+    style: string;
+    shotCount: number;
+    createVideoNodes: boolean;
+    useAiSplit: boolean;
+    createdAt: string;
+    updatedAt: string;
+};
+
 export type ConnectionHandle = {
     nodeId: string;
     handleType: "source" | "target";

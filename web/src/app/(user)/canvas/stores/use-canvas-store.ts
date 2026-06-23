@@ -6,7 +6,7 @@ import { localForageStorage } from "@/lib/localforage-storage";
 import { fetchUserConfig, syncUserCanvasData } from "@/services/api/user-config";
 import { useUserStore } from "@/stores/use-user-store";
 import type { CanvasBackgroundMode } from "@/lib/canvas-theme";
-import type { CanvasAssistantSession, CanvasConnection, CanvasNodeData, ViewportTransform } from "../types";
+import type { CanvasAssistantSession, CanvasConnection, CanvasNodeData, CanvasStoryWorkflowTemplate, ViewportTransform } from "../types";
 
 export type CanvasProject = {
     id: string;
@@ -20,6 +20,7 @@ export type CanvasProject = {
     backgroundMode: CanvasBackgroundMode;
     showImageInfo: boolean;
     viewport: ViewportTransform;
+    customStoryTemplates: CanvasStoryWorkflowTemplate[];
 };
 
 type CanvasStore = {
@@ -30,7 +31,7 @@ type CanvasStore = {
     openProject: (id: string) => CanvasProject | null;
     renameProject: (id: string, title: string) => void;
     deleteProjects: (ids: string[]) => void;
-    updateProject: (id: string, patch: Partial<Pick<CanvasProject, "nodes" | "connections" | "chatSessions" | "activeChatId" | "backgroundMode" | "showImageInfo" | "viewport">>) => void;
+    updateProject: (id: string, patch: Partial<Pick<CanvasProject, "nodes" | "connections" | "chatSessions" | "activeChatId" | "backgroundMode" | "showImageInfo" | "viewport" | "customStoryTemplates">>) => void;
     syncWithRemote: (token: string, remoteData: any, syncEnabled: boolean) => Promise<void>;
     setSyncEnabled: (enabled: boolean) => void;
 };
@@ -134,6 +135,7 @@ export const useCanvasStore = create<CanvasStore>()(
                     backgroundMode: "lines",
                     showImageInfo: false,
                     viewport: initialViewport,
+                    customStoryTemplates: [],
                 };
                 set((state) => ({ projects: [project, ...state.projects] }));
                 return id;
@@ -152,6 +154,7 @@ export const useCanvasStore = create<CanvasStore>()(
                     backgroundMode: source.backgroundMode || "lines",
                     showImageInfo: source.showImageInfo || false,
                     viewport: source.viewport || initialViewport,
+                    customStoryTemplates: source.customStoryTemplates || [],
                 };
                 set((state) => ({ projects: [project, ...state.projects] }));
                 return project.id;

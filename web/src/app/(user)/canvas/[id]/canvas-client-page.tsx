@@ -56,6 +56,7 @@ import {
     type CanvasImageGenerationType,
     type CanvasNodeData,
     type CanvasNodeMetadata,
+    type CanvasStoryWorkflowTemplate,
     type ConnectionHandle,
     type ContextMenuState,
     type Position,
@@ -159,6 +160,8 @@ function buildStoryWorkflowDraft(options: StoryWorkflowOptions, center: Position
     const shots = normalizeStoryShots(aiPlan?.shots, fallbackShots, options.shotCount);
     const nodes: CanvasNodeData[] = [];
     const connections: CanvasConnection[] = [];
+    const configSpec = NODE_DEFAULT_SIZE[CanvasNodeType.Config];
+    const workflowRowGap = configSpec.height + 48;
     const startX = center.x - 760;
     const startY = center.y - 360;
     const workflowMeta = (stage: string, index?: number, total?: number): Pick<CanvasNodeMetadata, "workflowTitle" | "workflowStage" | "workflowIndex" | "workflowTotal"> => ({
@@ -188,7 +191,7 @@ function buildStoryWorkflowDraft(options: StoryWorkflowOptions, center: Position
     assetTextNodes.forEach((node, index) => connections.push(createWorkflowConnection(summaryNode.id, node.id, index)));
 
     const shotTextNodes = shots.map((shot, index) =>
-        createWorkflowNode(CanvasNodeType.Text, `分镜文案 ${index + 1}`, { x: startX + 500, y: startY + index * 220 }, 360, 135, {
+        createWorkflowNode(CanvasNodeType.Text, `分镜文案 ${index + 1}`, { x: startX + 500, y: startY + index * workflowRowGap }, 360, 135, {
             content: `分镜 ${index + 1}：${shot}`,
             status: NODE_STATUS_SUCCESS,
             fontSize: 13,
@@ -199,7 +202,7 @@ function buildStoryWorkflowDraft(options: StoryWorkflowOptions, center: Position
     shotTextNodes.forEach((node, index) => connections.push(createWorkflowConnection(summaryNode.id, node.id, index + 100)));
 
     const imageConfigNodes = shotTextNodes.map((shotNode, index) =>
-        createWorkflowNode(CanvasNodeType.Config, `分镜生图 ${index + 1}`, { x: startX + 920, y: startY + index * 220 }, 390, 170, {
+        createWorkflowNode(CanvasNodeType.Config, `分镜生图 ${index + 1}`, { x: startX + 920, y: startY + index * workflowRowGap }, configSpec.width, configSpec.height, {
             generationMode: "image",
             generationType: "generation",
             model: defaults.imageModel,
@@ -219,7 +222,7 @@ function buildStoryWorkflowDraft(options: StoryWorkflowOptions, center: Position
 
     if (options.createVideoNodes) {
         const videoNodes = shotTextNodes.map((shotNode, index) =>
-            createWorkflowNode(CanvasNodeType.Config, `视频配置 ${index + 1}`, { x: startX + 1380, y: startY + index * 220 }, 370, 165, {
+            createWorkflowNode(CanvasNodeType.Config, `视频配置 ${index + 1}`, { x: startX + 1380, y: startY + index * workflowRowGap }, configSpec.width, configSpec.height, {
                 generationMode: "video",
                 model: defaults.videoModel,
                 size: defaults.imageSize,
@@ -729,6 +732,7 @@ function InfiniteCanvasPage() {
     const [runningNodeId, setRunningNodeId] = useState<string | null>(null);
     const [isMiniMapOpen, setIsMiniMapOpen] = useState(false);
     const [storyWorkflowOpen, setStoryWorkflowOpen] = useState(false);
+    const [customStoryTemplates, setCustomStoryTemplates] = useState<CanvasStoryWorkflowTemplate[]>([]);
     const [backgroundMode, setBackgroundMode] = useState<CanvasBackgroundMode>("lines");
     const [showImageInfo, setShowImageInfo] = useState(false);
     const [clearConfirmOpen, setClearConfirmOpen] = useState(false);
@@ -802,6 +806,7 @@ function InfiniteCanvasPage() {
             setActiveChatId(project.activeChatId || null);
             setBackgroundMode(project.backgroundMode);
             setShowImageInfo(project.showImageInfo || false);
+            setCustomStoryTemplates(project.customStoryTemplates || []);
             setViewport(project.viewport);
             historyRef.current = { past: [], future: [] };
             if (historyCommitTimerRef.current) {
@@ -850,8 +855,8 @@ function InfiniteCanvasPage() {
 
     useEffect(() => {
         if (!projectLoaded || historyPausedRef.current) return;
-        updateProject(projectId, { nodes, connections, chatSessions, activeChatId, backgroundMode, showImageInfo });
-    }, [activeChatId, backgroundMode, chatSessions, connections, nodes, projectId, projectLoaded, showImageInfo, updateProject]);
+        updateProject(projectId, { nodes, connections, chatSessions, activeChatId, backgroundMode, showImageInfo, customStoryTemplates });
+    }, [activeChatId, backgroundMode, chatSessions, connections, customStoryTemplates, nodes, projectId, projectLoaded, showImageInfo, updateProject]);
 
     useEffect(() => {
         if (!dialogNodeId) setNodeImageSettingsOpen(false);
@@ -3342,7 +3347,7 @@ function InfiniteCanvasPage() {
                 />
 
 
-                <StoryWorkflowModal open={storyWorkflowOpen} onCancel={() => setStoryWorkflowOpen(false)} onCreate={createStoryWorkflow} />
+                <StoryWorkflowModal open={storyWorkflowOpen} customTemplates={customStoryTemplates} onCustomTemplatesChange={setCustomStoryTemplates} onCancel={() => setStoryWorkflowOpen(false)} onCreate={createStoryWorkflow} />
                 {isMiniMapOpen ? <Minimap nodes={nodes} viewport={viewport} viewportSize={size} onViewportChange={setViewport} /> : null}
 
                 <CanvasZoomControls scale={viewport.k} onScaleChange={setZoomScale} onReset={resetViewport} isMiniMapOpen={isMiniMapOpen} onToggleMiniMap={() => setIsMiniMapOpen((value) => !value)} />
