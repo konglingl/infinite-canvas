@@ -3216,6 +3216,15 @@ function InfiniteCanvasPage() {
                             createConfigFromTextNode(contextMenuNode, "video");
                             setContextMenu(null);
                         }}
+                        onSelectWorkflowStage={() => {
+                            if (!contextMenuNode?.metadata?.workflowStage || !contextMenuNode.metadata.workflowTitle) return;
+                            const { workflowStage, workflowTitle } = contextMenuNode.metadata;
+                            const sameStageIds = nodesRef.current.filter((node) => node.metadata?.workflowStage === workflowStage && node.metadata?.workflowTitle === workflowTitle).map((node) => node.id);
+                            setSelectedNodeIds(new Set(sameStageIds));
+                            setSelectedConnectionId(null);
+                            setContextMenu(null);
+                            message.success(`已选中 ${sameStageIds.length} 个同阶段节点`);
+                        }}
                         onDuplicate={() => {
                             if (contextMenu.type !== "node") return;
                             duplicateNode(contextMenu.nodeId);
