@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { ArrowUp, History, ImageIcon, LoaderCircle, MessageSquare, PanelRightClose, Plus, RotateCcw, Settings2, Sparkles, Trash2, X } from "lucide-react";
-import { Button, Modal, Tooltip } from "antd";
+import { App, Button, Modal, Tooltip } from "antd";
 import { motion } from "motion/react";
 
 import { ImageGenerationPending } from "@/components/image-generation-pending";
@@ -27,6 +27,14 @@ import { CanvasPromptLibrary } from "./canvas-prompt-library";
 import { CanvasNodeType, type CanvasAssistantImage, type CanvasAssistantMessage, type CanvasAssistantReference, type CanvasAssistantSession, type CanvasNodeData } from "../types";
 
 type AssistantMode = "ask" | "image";
+type AssistantQuickAction = "optimizePrompt" | "splitStoryboard" | "characterBible" | "sceneBible";
+
+const ASSISTANT_QUICK_ACTIONS: Array<{ id: AssistantQuickAction; label: string; hint: string }> = [
+    { id: "optimizePrompt", label: "优化提示词", hint: "把当前想法改成可直接生图的高质量提示词" },
+    { id: "splitStoryboard", label: "拆分分镜", hint: "把故事拆成连续镜头和画面描述" },
+    { id: "characterBible", label: "角色设定", hint: "提炼角色外观、服饰、气质和一致性特征" },
+    { id: "sceneBible", label: "场景设定", hint: "提炼场景空间、光线、色彩和氛围" },
+];
 const PANEL_MOTION_MS = 500;
 const PANEL_MOTION_SECONDS = PANEL_MOTION_MS / 1000;
 
@@ -45,6 +53,7 @@ type CanvasAssistantPanelProps = {
 };
 
 export function CanvasAssistantPanel({ nodes, selectedNodeIds, sessions, activeSessionId, onSelectNodeIds, onSessionsChange, onInsertImage, onInsertText, onPasteImage, onCollapseStart, onCollapse }: CanvasAssistantPanelProps) {
+    const { message } = App.useApp();
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const effectiveConfig = useEffectiveConfig();
     const modelCosts = useConfigStore((state) => state.publicSettings?.modelChannel.modelCosts);
@@ -204,6 +213,17 @@ export function CanvasAssistantPanel({ nodes, selectedNodeIds, sessions, activeS
         await sendMessage(text, mode, messages);
     };
 
+
+    const runQuickAction = async (action: AssistantQuickAction) => {
+        if (isRunning) return;
+        if (!prompt.trim() && !selectedReferences.length) {
+            message.warning("请先输入想法，或选中画布上的文本/图片节点作为引用");
+            return;
+        }
+        setMode("ask");
+        await sendMessage(buildAssistantQuickActionPrompt(action, prompt, selectedReferences), "ask", messages, selectedReferences);
+    };
+
     const retryMessage = (message: CanvasAssistantMessage) => {
         const index = messages.findIndex((item) => item.id === message.id);
         const userIndex = messages.slice(0, index).findLastIndex((item) => item.role === "user");
@@ -338,6 +358,7 @@ export function CanvasAssistantPanel({ nodes, selectedNodeIds, sessions, activeS
                         onModeChange={setMode}
                         onPromptChange={setPrompt}
                         onSubmit={submit}
+                        onQuickAction={(action) => void runQuickAction(action)}
                         onConfigChange={(key, value) => updateConfig(key === "count" ? "canvasImageCount" : key, value)}
                         onMissingConfig={() => openConfigDialog(true)}
                         onRemoveReference={(id) => {
@@ -387,6 +408,7 @@ function AssistantComposer({
     onModeChange,
     onPromptChange,
     onSubmit,
+    onQuickAction,
     onConfigChange,
     onMissingConfig,
     onRemoveReference,
@@ -402,6 +424,7 @@ function AssistantComposer({
     onModeChange: (mode: AssistantMode) => void;
     onPromptChange: (prompt: string) => void;
     onSubmit: () => void;
+    onQuickAction: (action: AssistantQuickAction) => void;
     onConfigChange: (key: keyof AiConfig, value: string) => void;
     onMissingConfig: () => void;
     onRemoveReference: (id: string) => void;
@@ -422,6 +445,8 @@ function AssistantComposer({
                     ))}
                 </div>
             ) : null}
+
+            {mode === "ask" ? <AssistantQuickActions disabled={isRunning || (!prompt.trim() && !references.length)} onAction={onQuickAction} /> : null}
             <div className="rounded-[28px] border px-3 pb-3 pt-3 shadow-lg" style={{ background: theme.toolbar.panel, borderColor: theme.node.stroke }}>
                 <textarea
                     value={prompt}
@@ -469,6 +494,29 @@ function AssistantComposer({
                     </Button>
                 </div>
             </div>
+        </div>
+    );
+}
+
+function AssistantQuickActions({ disabled, onAction }: { disabled: boolean; onAction: (action: AssistantQuickAction) => void }) {
+    const theme = canvasThemes[useThemeStore((state) => state.theme)];
+    return (
+        <div className="mb-1.5 flex flex-wrap gap-1 px-1">
+            {ASSISTANT_QUICK_ACTIONS.map((action) => (
+                <Tooltip key={action.id} title={action.hint}>
+                    <Button
+                        size="small"
+                        type="text"
+                        className="!h-7 !rounded-full !px-2 !text-xs"
+                        disabled={disabled}
+                        style={{ background: theme.node.fill, color: theme.node.text, borderColor: theme.node.stroke }}
+                        icon={<Sparkles className="size-3" />}
+                        onClick={() => onAction(action.id)}
+                    >
+                        {action.label}
+                    </Button>
+                </Tooltip>
+            ))}
         </div>
     );
 }
@@ -681,6 +729,36 @@ async function buildChatMessages(messages: CanvasAssistantMessage[]): Promise<Ch
     );
 }
 
+function buildAssistantQuickActionPrompt(action: AssistantQuickAction, input: string, references: CanvasAssistantReference[]) {
+    const source = input.trim() || "请基于我选中的画布引用内容进行处理。";
+    const referenceHint = references.length ? "\n\n已附带选中的画布节点作为参考，请优先结合参考内容。" : "";
+    if (action === "optimizePrompt") {
+        return `请把下面内容优化成可直接用于 AI 生图/图生图的高质量中文提示词。
+要求：只输出优化后的提示词；包含主体、构图、镜头、光线、色彩、材质、风格、氛围；如果有角色或场景，请强调一致性。
+
+原始内容：
+${source}${referenceHint}`;
+    }
+    if (action === "splitStoryboard") {
+        return `请把下面故事或创意拆成 6-10 个连续分镜。
+要求：每个分镜包含镜头序号、画面描述、主体动作、镜头/景别、光线氛围；每条都能直接交给生图模型生成画面。
+
+内容：
+${source}${referenceHint}`;
+    }
+    if (action === "characterBible") {
+        return `请从下面内容中提炼角色设定。
+要求：按角色分条输出；每个角色包含姓名/代号、年龄气质、外观特征、服装材质、表情动作、一致性关键词，以及一段可直接用于生图的角色设定提示词。
+
+内容：
+${source}${referenceHint}`;
+    }
+    return `请从下面内容中提炼场景设定。
+要求：按场景分条输出；每个场景包含地点、时代/时间、空间结构、光线、色彩、氛围、关键道具，以及一段可直接用于生图的场景提示词。
+
+内容：
+${source}${referenceHint}`;
+}
 function createSession(): CanvasAssistantSession {
     const now = new Date().toISOString();
     return { id: nanoid(), title: "新对话", messages: [], createdAt: now, updatedAt: now };
