@@ -30,6 +30,7 @@ const STYLE_OPTIONS = [
 type StoryWorkflowTemplate = {
     title: string;
     tag: string;
+    category: string;
     description: string;
     story: string;
     style: string;
@@ -37,10 +38,19 @@ type StoryWorkflowTemplate = {
     createVideoNodes: boolean;
 };
 
+const TEMPLATE_CATEGORIES = [
+    { key: "all", label: "全部" },
+    { key: "short", label: "短视频" },
+    { key: "character", label: "角色叙事" },
+    { key: "motion", label: "运动镜头" },
+    { key: "commerce", label: "商业广告" },
+];
+
 const WORKFLOW_TEMPLATES: StoryWorkflowTemplate[] = [
     {
         title: "萌宠舞蹈短视频",
         tag: "竖屏爆款",
+        category: "short",
         description: "参考 MagicalCanvas 的动物跳舞案例，快速生成角色图、动作递进图和视频节点。",
         style: "可爱写实短视频，竖屏构图，明亮室内光线，夸张但自然的动作，适合社媒传播",
         shotCount: 5,
@@ -50,6 +60,7 @@ const WORKFLOW_TEMPLATES: StoryWorkflowTemplate[] = [
     {
         title: "电影片场探访",
         tag: "角色一致",
+        category: "character",
         description: "把角色参考扩展成片场自拍、正面设定、环境照和连续剧情镜头。",
         style: "电影感写实，真实摄影质感，柔和片场灯光，角色面部一致，背景有轻微景深",
         shotCount: 6,
@@ -59,6 +70,7 @@ const WORKFLOW_TEMPLATES: StoryWorkflowTemplate[] = [
     {
         title: "第一视角竞速",
         tag: "运动镜头",
+        category: "motion",
         description: "围绕高速运动主体拆出 POV、跟拍、特写和冲刺视频配置。",
         style: "高速运动摄影，第一视角，强动态模糊，低机位广角，电影级色彩和速度感",
         shotCount: 6,
@@ -68,6 +80,7 @@ const WORKFLOW_TEMPLATES: StoryWorkflowTemplate[] = [
     {
         title: "产品广告分镜",
         tag: "商业广告",
+        category: "commerce",
         description: "把产品卖点拆成主视觉、材质特写、使用场景和收尾海报。",
         style: "高端产品广告摄影，干净背景，商业布光，微距材质细节，简洁高级",
         shotCount: 5,
@@ -83,8 +96,19 @@ export function StoryWorkflowModal({ open, onCancel, onCreate }: StoryWorkflowMo
     const [shotCount, setShotCount] = useState(6);
     const [createVideoNodes, setCreateVideoNodes] = useState(true);
     const [useAiSplit, setUseAiSplit] = useState(true);
+    const [templateCategory, setTemplateCategory] = useState("all");
+    const [templateKeyword, setTemplateKeyword] = useState("");
     const selectedTemplate = useMemo(() => WORKFLOW_TEMPLATES.find((template) => template.title === title && template.story === story) || null, [story, title]);
     const expectedNodeCount = useMemo(() => 1 + 8 + shotCount * (createVideoNodes ? 3 : 2), [createVideoNodes, shotCount]);
+    const filteredTemplates = useMemo(() => {
+        const keyword = templateKeyword.trim().toLowerCase();
+        return WORKFLOW_TEMPLATES.filter((template) => {
+            const categoryMatched = templateCategory === "all" || template.category === templateCategory;
+            if (!categoryMatched) return false;
+            if (!keyword) return true;
+            return [template.title, template.tag, template.description, template.story, template.style].join(" ").toLowerCase().includes(keyword);
+        });
+    }, [templateCategory, templateKeyword]);
     const wordCount = useMemo(() => story.trim().length, [story]);
 
     const applyTemplate = (template: StoryWorkflowTemplate) => {
@@ -133,8 +157,35 @@ export function StoryWorkflowModal({ open, onCancel, onCreate }: StoryWorkflowMo
                         <div className="text-sm font-medium text-foreground">MagicalCanvas 灵感模板</div>
                         <div className="text-xs text-muted-foreground">点击后自动填入标题、故事、风格和分镜数量</div>
                     </div>
+                    <div className="flex flex-col gap-2 rounded-xl border border-border/70 bg-background/70 p-2 md:flex-row md:items-center md:justify-between">
+                        <div className="flex flex-wrap gap-1">
+                            {TEMPLATE_CATEGORIES.map((category) => {
+                                const active = templateCategory === category.key;
+                                return (
+                                    <button
+                                        key={category.key}
+                                        type="button"
+                                        onClick={() => setTemplateCategory(category.key)}
+                                        className={`rounded-full border px-2.5 py-1 text-xs transition ${active ? "border-purple-400 bg-purple-100 text-purple-800" : "border-border bg-background text-muted-foreground hover:border-purple-300 hover:text-purple-700"}`}
+                                    >
+                                        {category.label}
+                                    </button>
+                                );
+                            })}
+                        </div>
+                        <Input
+                            allowClear
+                            value={templateKeyword}
+                            onChange={(event) => setTemplateKeyword(event.target.value)}
+                            placeholder="搜索模板、风格或场景"
+                            className="md:max-w-[260px]"
+                        />
+                    </div>
                     <div className="grid gap-2 md:grid-cols-2">
-                        {WORKFLOW_TEMPLATES.map((template) => {
+                        {filteredTemplates.length === 0 ? (
+                            <div className="rounded-xl border border-dashed border-purple-200 bg-purple-50/60 p-4 text-center text-xs text-purple-800 md:col-span-2">没有匹配的模板，试试切换分类或清空搜索。</div>
+                        ) : null}
+                        {filteredTemplates.map((template) => {
                             const active = template.title === selectedTemplate?.title;
                             return (
                                 <button
