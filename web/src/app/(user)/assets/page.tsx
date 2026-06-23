@@ -1,13 +1,14 @@
 "use client";
 
-import { Copy, Download, PencilLine, Search, Trash2, Upload } from "lucide-react";
+import { CheckSquare, Copy, Download, PencilLine, Search, Trash2, Upload, UploadCloud } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { App, Button, Card, Drawer, Empty, Form, Image, Input, Modal, Pagination, Select, Space, Tag, Typography } from "antd";
+import { App, Button, Card, Checkbox, Drawer, Empty, Form, Image, Input, Modal, Pagination, Select, Space, Tag, Typography } from "antd";
 import { saveAs } from "file-saver";
 
 import { useCopyText } from "@/hooks/use-copy-text";
 import { formatBytes, readFileAsDataUrl } from "@/lib/image-utils";
 import { uploadImage } from "@/services/image-storage";
+import { uploadMediaFile } from "@/services/file-storage";
 import { cn } from "@/lib/utils";
 import { LocalStorageNotice } from "@/components/local-storage-notice";
 import { useAssetStore, type Asset, type AssetKind, type ImageAsset } from "@/stores/use-asset-store";
@@ -39,6 +40,7 @@ export default function AssetsPage() {
     const coverInputRef = useRef<HTMLInputElement>(null);
     const imageInputRef = useRef<HTMLInputElement>(null);
     const assetInputRef = useRef<HTMLInputElement>(null);
+    const batchFileInputRef = useRef<HTMLInputElement>(null);
     const assets = useAssetStore((state) => state.assets);
     const addAsset = useAssetStore((state) => state.addAsset);
     const updateAsset = useAssetStore((state) => state.updateAsset);
@@ -55,6 +57,10 @@ export default function AssetsPage() {
     const [deletingAsset, setDeletingAsset] = useState<Asset | null>(null);
     const [formKind, setFormKind] = useState<AssetKind>("text");
     const [imageDraft, setImageDraft] = useState<ImageDraft>(null);
+    const [isDraggingFiles, setIsDraggingFiles] = useState(false);
+    const [batchImporting, setBatchImporting] = useState(false);
+    const [manageMode, setManageMode] = useState(false);
+    const [selectedAssetIds, setSelectedAssetIds] = useState<Set<string>>(new Set());
     const coverUrl = Form.useWatch("coverUrl", form) || "";
     const title = Form.useWatch("title", form) || "";
     const tags = Form.useWatch("tags", form) || [];
@@ -79,6 +85,12 @@ export default function AssetsPage() {
         const maxPage = Math.max(1, Math.ceil(filteredAssets.length / pageSize));
         setPage((value) => Math.min(value, maxPage));
     }, [filteredAssets.length, pageSize]);
+
+
+    useEffect(() => {
+        const validIds = new Set(validAssets.map((asset) => asset.id));
+        setSelectedAssetIds((ids) => new Set(Array.from(ids).filter((id) => validIds.has(id))));
+    }, [validAssets]);
 
     const openCreate = () => {
         setEditingAsset(null);
@@ -208,6 +220,92 @@ export default function AssetsPage() {
         }
     };
 
+    const importLooseAssetFiles = async (filesLike?: FileList | File[]) => {
+        const files = Array.from(filesLike || []).filter((file) => file.type.startsWith("image/") || file.type.startsWith("video/") || file.type.startsWith("text/") || /\.(txt|md|markdown|prompt)$/i.test(file.name));
+        if (!files.length) {
+            message.warning("请选择图片、视频或文本文件");
+            return;
+        }
+        setBatchImporting(true);
+        const hideLoading = message.loading(`正在导入 ${files.length} 个素材...`, 0);
+        let imported = 0;
+        let failed = 0;
+        try {
+            for (const file of files) {
+                try {
+                    if (file.type.startsWith("image/")) {
+                        const image = await uploadImage(file);
+                        addAsset({
+                            kind: "image",
+                            title: file.name.replace(/\.[^.]+$/, "") || file.name,
+                            coverUrl: image.url,
+                            tags: ["批量导入"],
+                            source: "拖放/批量导入",
+                            note: "",
+                            data: { dataUrl: image.url, storageKey: image.storageKey, width: image.width, height: image.height, bytes: image.bytes, mimeType: image.mimeType },
+                        });
+                        imported++;
+                    } else if (file.type.startsWith("video/")) {
+                        const media = await uploadMediaFile(file, "asset-video");
+                        addAsset({
+                            kind: "video",
+                            title: file.name.replace(/\.[^.]+$/, "") || file.name,
+                            coverUrl: "",
+                            tags: ["批量导入"],
+                            source: "拖放/批量导入",
+                            note: "",
+                            data: { url: media.url, storageKey: media.storageKey, width: media.width || 1280, height: media.height || 720, bytes: media.bytes, mimeType: media.mimeType },
+                        });
+                        imported++;
+                    } else {
+                        const content = await file.text();
+                        addAsset({ kind: "text", title: file.name.replace(/\.[^.]+$/, "") || file.name, coverUrl: "", tags: ["批量导入"], source: "拖放/批量导入", note: "", data: { content } });
+                        imported++;
+                    }
+                } catch (error) {
+                    console.error("Import asset failed", file.name, error);
+                    failed++;
+                }
+            }
+            if (imported) message.success(`已导入 ${imported} 个素材${failed ? `，${failed} 个失败` : ""}`);
+            else message.error("素材导入失败");
+        } finally {
+            hideLoading();
+            setBatchImporting(false);
+            setIsDraggingFiles(false);
+            if (batchFileInputRef.current) batchFileInputRef.current.value = "";
+        }
+    };
+
+    const toggleSelectAsset = (id: string, checked?: boolean) => {
+        setSelectedAssetIds((ids) => {
+            const next = new Set(ids);
+            const shouldSelect = checked ?? !next.has(id);
+            if (shouldSelect) next.add(id);
+            else next.delete(id);
+            return next;
+        });
+    };
+
+    const selectVisibleAssets = () => setSelectedAssetIds((ids) => new Set([...ids, ...visibleAssets.map((asset) => asset.id)]));
+
+    const clearSelectedAssets = () => setSelectedAssetIds(new Set());
+
+    const deleteSelectedAssets = () => {
+        if (!selectedAssetIds.size) return;
+        Modal.confirm({
+            title: "批量删除素材",
+            content: `确定删除选中的 ${selectedAssetIds.size} 个素材吗？删除后会从我的素材中移除。`,
+            okText: "删除",
+            okButtonProps: { danger: true },
+            cancelText: "取消",
+            onOk: () => {
+                selectedAssetIds.forEach((id) => removeAsset(id));
+                message.success(`已删除 ${selectedAssetIds.size} 个素材`);
+                setSelectedAssetIds(new Set());
+            },
+        });
+    };
     const confirmDelete = () => {
         if (!deletingAsset) return;
         removeAsset(deletingAsset.id);
@@ -217,7 +315,29 @@ export default function AssetsPage() {
 
     return (
         <div className="flex h-full flex-col overflow-hidden bg-background text-stone-900 dark:text-stone-100">
-            <main className="min-h-0 flex-1 overflow-y-auto bg-[radial-gradient(#e5e7eb_1px,transparent_1px)] px-6 py-8 [background-size:16px_16px] dark:bg-[radial-gradient(rgba(245,245,244,.14)_1px,transparent_1px)]">
+            <main
+                className="relative min-h-0 flex-1 overflow-y-auto bg-[radial-gradient(#e5e7eb_1px,transparent_1px)] px-6 py-8 [background-size:16px_16px] dark:bg-[radial-gradient(rgba(245,245,244,.14)_1px,transparent_1px)]"
+                onDragOver={(event) => {
+                    event.preventDefault();
+                    if (event.dataTransfer.types.includes("Files")) setIsDraggingFiles(true);
+                }}
+                onDragLeave={(event) => {
+                    if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setIsDraggingFiles(false);
+                }}
+                onDrop={(event) => {
+                    event.preventDefault();
+                    void importLooseAssetFiles(event.dataTransfer.files);
+                }}
+            >
+                {isDraggingFiles ? (
+                    <div className="pointer-events-none absolute inset-4 z-30 grid place-items-center rounded-3xl border-2 border-dashed border-purple-400 bg-purple-500/10 text-purple-700 backdrop-blur-sm dark:text-purple-200">
+                        <div className="flex flex-col items-center gap-3 rounded-2xl bg-white/90 px-8 py-6 text-center shadow-xl dark:bg-stone-950/90">
+                            <UploadCloud className="size-10" />
+                            <div className="text-base font-semibold">松开即可批量导入素材</div>
+                            <div className="text-xs opacity-70">支持图片、视频、txt / md 文本文件</div>
+                        </div>
+                    </div>
+                ) : null}
                 <div className="pb-8">
                     <div className="mx-auto max-w-5xl text-center">
                         <h1 className="text-4xl font-semibold tracking-tight text-stone-950 dark:text-stone-100">我的素材</h1>
@@ -278,7 +398,25 @@ export default function AssetsPage() {
                                     className="cursor-pointer text-sm font-medium text-stone-700 underline-offset-4 hover:underline focus-visible:outline-none focus-visible:underline dark:text-stone-300"
                                     onClick={() => assetInputRef.current?.click()}
                                 >
-                                    导入素材
+                                    导入备份包
+                                </button>
+                                <button
+                                    type="button"
+                                    className="cursor-pointer text-sm font-medium text-stone-700 underline-offset-4 hover:underline focus-visible:outline-none focus-visible:underline dark:text-stone-300 disabled:cursor-not-allowed disabled:opacity-50"
+                                    disabled={batchImporting}
+                                    onClick={() => batchFileInputRef.current?.click()}
+                                >
+                                    批量导入文件
+                                </button>
+                                <button
+                                    type="button"
+                                    className="cursor-pointer text-sm font-medium text-stone-700 underline-offset-4 hover:underline focus-visible:outline-none focus-visible:underline dark:text-stone-300"
+                                    onClick={() => {
+                                        setManageMode((value) => !value);
+                                        setSelectedAssetIds(new Set());
+                                    }}
+                                >
+                                    {manageMode ? "退出管理" : "管理素材"}
                                 </button>
                                 <button
                                     type="button"
@@ -293,11 +431,33 @@ export default function AssetsPage() {
                 </div>
 
                 <div className="mx-auto flex max-w-7xl flex-col gap-5">
+                    {manageMode ? (
+                        <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border bg-white/80 px-4 py-3 text-sm shadow-sm backdrop-blur dark:border-stone-800 dark:bg-stone-950/80">
+                            <div className="inline-flex items-center gap-2 text-stone-600 dark:text-stone-300">
+                                <CheckSquare className="size-4" />
+                                已选 {selectedAssetIds.size} 个素材
+                            </div>
+                            <Space wrap>
+                                <Button size="small" onClick={selectVisibleAssets} disabled={!visibleAssets.length}>
+                                    选择本页
+                                </Button>
+                                <Button size="small" onClick={clearSelectedAssets} disabled={!selectedAssetIds.size}>
+                                    取消选择
+                                </Button>
+                                <Button size="small" danger onClick={deleteSelectedAssets} disabled={!selectedAssetIds.size}>
+                                    删除选中
+                                </Button>
+                            </Space>
+                        </div>
+                    ) : null}
                     <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
                         {visibleAssets.map((asset) => (
                             <AssetCard
                                 key={asset.id}
                                 asset={asset}
+                                manageMode={manageMode}
+                                selected={selectedAssetIds.has(asset.id)}
+                                onSelect={(checked) => toggleSelectAsset(asset.id, checked)}
                                 onOpen={() => setPreviewAsset(asset)}
                                 onEdit={() => openEdit(asset)}
                                 onCopy={copyAssetText}
@@ -436,6 +596,7 @@ export default function AssetsPage() {
             <AssetDrawer asset={previewAsset} onClose={() => setPreviewAsset(null)} onCopy={copyAssetText} onDownload={downloadImage} />
 
             <input ref={assetInputRef} type="file" accept="application/zip,.zip" className="hidden" onChange={(event) => void importAssetZip(event.target.files?.[0])} />
+            <input ref={batchFileInputRef} type="file" multiple accept="image/*,video/*,text/*,.txt,.md,.markdown,.prompt" className="hidden" onChange={(event) => void importLooseAssetFiles(event.target.files || undefined)} />
 
             <Modal title="删除素材" open={Boolean(deletingAsset)} onCancel={() => setDeletingAsset(null)} onOk={confirmDelete} okText="删除" okButtonProps={{ danger: true }} cancelText="取消">
                 确定删除「{deletingAsset?.title}」吗？删除后会从我的素材中移除。
@@ -483,6 +644,9 @@ export default function AssetsPage() {
 
 function AssetCard({
     asset,
+    manageMode,
+    selected,
+    onSelect,
     onOpen,
     onEdit,
     onCopy,
@@ -492,6 +656,9 @@ function AssetCard({
     onPlayVideo,
 }: {
     asset: Asset;
+    manageMode?: boolean;
+    selected?: boolean;
+    onSelect?: (checked: boolean) => void;
     onOpen: () => void;
     onEdit: () => void;
     onCopy: (asset: Asset) => void;
@@ -504,6 +671,10 @@ function AssetCard({
     const summary = assetSummary(asset);
 
     const handleCardClick = () => {
+        if (manageMode) {
+            onSelect?.(!selected);
+            return;
+        }
         if (asset.kind === "text") {
             void onCopy(asset);
         } else if (asset.kind === "image") {
@@ -516,7 +687,7 @@ function AssetCard({
     return (
         <Card
             hoverable
-            className="overflow-hidden"
+            className={cn("relative overflow-hidden", selected && "ring-2 ring-purple-500")}
             styles={{ body: { padding: 0 } }}
             cover={
                 <button type="button" className="block w-full text-left" onClick={handleCardClick}>
@@ -530,6 +701,14 @@ function AssetCard({
                 </button>
             }
         >
+            {manageMode ? (
+                <Checkbox
+                    checked={selected}
+                    className="absolute left-3 top-3 z-10 rounded bg-white/90 p-1 shadow dark:bg-stone-900/90"
+                    onChange={(event) => onSelect?.(event.target.checked)}
+                    onClick={(event) => event.stopPropagation()}
+                />
+            ) : null}
             <button type="button" className="block w-full text-left" onClick={handleCardClick}>
                 <div className="p-4">
                     <div className="flex items-start justify-between gap-3">
@@ -554,29 +733,31 @@ function AssetCard({
                     </div>
                 </div>
             </button>
-            <div className="flex items-center gap-2 px-4 pb-4">
-                <Button size="small" onClick={onOpen}>
-                    查看
-                </Button>
-                {asset.kind !== "video" ? (
-                    <Button size="small" icon={<PencilLine className="size-3.5" />} onClick={onEdit}>
-                        编辑
+            {!manageMode ? (
+                <div className="flex items-center gap-2 px-4 pb-4">
+                    <Button size="small" onClick={onOpen}>
+                        查看
                     </Button>
-                ) : null}
-                {asset.kind === "text" ? (
-                    <Button size="small" icon={<Copy className="size-3.5" />} onClick={() => void onCopy(asset)}>
-                        复制
+                    {asset.kind !== "video" ? (
+                        <Button size="small" icon={<PencilLine className="size-3.5" />} onClick={onEdit}>
+                            编辑
+                        </Button>
+                    ) : null}
+                    {asset.kind === "text" ? (
+                        <Button size="small" icon={<Copy className="size-3.5" />} onClick={() => void onCopy(asset)}>
+                            复制
+                        </Button>
+                    ) : null}
+                    {asset.kind === "image" || asset.kind === "video" ? (
+                        <Button size="small" icon={<Download className="size-3.5" />} onClick={() => onDownload(asset)}>
+                            下载
+                        </Button>
+                    ) : null}
+                    <Button size="small" danger icon={<Trash2 className="size-3.5" />} onClick={onDelete}>
+                        删除
                     </Button>
-                ) : null}
-                {asset.kind === "image" || asset.kind === "video" ? (
-                    <Button size="small" icon={<Download className="size-3.5" />} onClick={() => onDownload(asset)}>
-                        下载
-                    </Button>
-                ) : null}
-                <Button size="small" danger icon={<Trash2 className="size-3.5" />} onClick={onDelete}>
-                    删除
-                </Button>
-            </div>
+                </div>
+            ) : null}
         </Card>
     );
 }
