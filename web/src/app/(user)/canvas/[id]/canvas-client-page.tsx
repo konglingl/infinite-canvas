@@ -390,6 +390,23 @@ function sortWorkflowNodesForPromptCopy(a: CanvasNodeData, b: CanvasNodeData) {
     return (aStageOrder < 0 ? Number.MAX_SAFE_INTEGER : aStageOrder) - (bStageOrder < 0 ? Number.MAX_SAFE_INTEGER : bStageOrder) || (a.metadata?.workflowIndex ?? Number.MAX_SAFE_INTEGER) - (b.metadata?.workflowIndex ?? Number.MAX_SAFE_INTEGER) || sortCanvasNodesForLayout(a, b);
 }
 
+function sanitizeMarkdownFileName(name: string) {
+    return name
+        .trim()
+        .replace(/[\/:*?"<>|]+/g, "-")
+        .replace(/\s+/g, "-")
+        .slice(0, 80) || "story-workflow";
+}
+
+function buildWorkflowMarkdown(title: string, workflowNodes: CanvasNodeData[]) {
+    const blocks = [...workflowNodes].sort(sortWorkflowNodesForPromptCopy).map((node) => {
+        const sectionTitle = [node.metadata?.workflowStage, node.metadata?.workflowIndex ? `${node.metadata.workflowIndex}/${node.metadata.workflowTotal || "?"}` : "", node.title].filter(Boolean).join(" · ");
+        const prompt = getCanvasNodePromptText(node) || "（无提示词或文本内容）";
+        return `## ${sectionTitle}\n\n- 类型：${node.type}\n- 状态：${node.metadata?.status || "未设置"}\n\n${prompt}`;
+    });
+    return [`# ${title}`, "", `> 导出自 MagicalCanvas，共 ${workflowNodes.length} 个节点。`, "", ...blocks, ""].join("\n");
+}
+
 function getCanvasNodeBounds(layoutNodes: CanvasNodeData[]): CanvasNodeBounds {
     const left = Math.min(...layoutNodes.map((node) => node.position.x));
     const top = Math.min(...layoutNodes.map((node) => node.position.y));
@@ -2048,6 +2065,25 @@ function InfiniteCanvasPage() {
         [copyText, message],
     );
 
+    const exportWorkflowMarkdown = useCallback(
+        (source: CanvasNodeData) => {
+            const workflowTitle = source.metadata?.workflowTitle;
+            if (!workflowTitle) {
+                message.warning("当前节点不属于故事工作流");
+                return;
+            }
+            const workflowNodes = nodesRef.current.filter((node) => node.metadata?.workflowTitle === workflowTitle);
+            if (!workflowNodes.length) {
+                message.warning("暂无可导出的工作流节点");
+                return;
+            }
+            const markdown = buildWorkflowMarkdown(workflowTitle, workflowNodes);
+            saveAs(new Blob([markdown], { type: "text/markdown;charset=utf-8" }), `${sanitizeMarkdownFileName(workflowTitle)}.md`);
+            message.success("工作流 Markdown 已导出");
+        },
+        [message],
+    );
+
     const copyNodeImage = useCallback(
         async (node: CanvasNodeData) => {
             if (node.type !== CanvasNodeType.Image || !node.metadata?.content) {
@@ -3312,6 +3348,11 @@ function InfiniteCanvasPage() {
                         onCopyWorkflowStagePrompts={() => {
                             if (!contextMenuNode) return;
                             copyWorkflowPrompts(contextMenuNode, true);
+                            setContextMenu(null);
+                        }}
+                        onExportWorkflowMarkdown={() => {
+                            if (!contextMenuNode) return;
+                            exportWorkflowMarkdown(contextMenuNode);
                             setContextMenu(null);
                         }}
                         onCreateImageConfig={() => {
