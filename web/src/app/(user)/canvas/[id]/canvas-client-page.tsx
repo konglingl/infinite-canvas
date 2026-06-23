@@ -43,6 +43,7 @@ import { Minimap } from "../components/canvas-mini-map";
 import { CanvasNode } from "../components/canvas-node";
 import { CanvasNodePromptPanel, type CanvasNodeGenerationMode } from "../components/canvas-node-prompt-panel";
 import { CanvasToolbar } from "../components/canvas-toolbar";
+import { StoryWorkflowModal, type StoryWorkflowOptions } from "../components/story-workflow-modal";
 import { AssetPickerModal, type AssetPickerTab, type InsertAssetPayload } from "../components/asset-picker-modal";
 import { CanvasZoomControls } from "../components/canvas-zoom-controls";
 import { useCanvasStore } from "../stores/use-canvas-store";
@@ -90,6 +91,7 @@ const VIDEO_NODE_MAX_WIDTH = 420;
 const VIDEO_NODE_MAX_HEIGHT = 420;
 const CONNECTION_HANDLE_HIT_RADIUS = 40;
 const CONNECTION_NODE_HIT_PADDING = 32;
+const NODE_STATUS_IDLE = "idle" as const;
 const NODE_STATUS_LOADING = "loading" as const;
 const NODE_STATUS_SUCCESS = "success" as const;
 const NODE_STATUS_ERROR = "error" as const;
@@ -122,6 +124,150 @@ function createCanvasNode(type: CanvasNodeType, position: Position, metadata?: C
         height: spec.height,
         metadata: { ...spec.metadata, ...metadata },
     };
+}
+
+
+type StoryWorkflowModelDefaults = {
+    imageModel?: string;
+    videoModel?: string;
+    imageSize?: string;
+    imageCount?: number;
+    videoSeconds?: string;
+    videoQuality?: string;
+    videoGenerateAudio?: string;
+    videoWatermark?: string;
+};
+
+function buildStoryWorkflowDraft(options: StoryWorkflowOptions, center: Position, defaults: StoryWorkflowModelDefaults): { nodes: CanvasNodeData[]; connections: CanvasConnection[] } {
+    const sentences = splitStorySentences(options.story);
+    const shots = buildStoryShots(sentences, options.shotCount);
+    const characters = extractStoryKeywords(options.story, CHARACTER_HINTS, 4, "主角");
+    const scenes = extractStoryKeywords(options.story, SCENE_HINTS, 4, "场景");
+    const nodes: CanvasNodeData[] = [];
+    const connections: CanvasConnection[] = [];
+    const startX = center.x - 760;
+    const startY = center.y - 360;
+
+    const summaryNode = createWorkflowNode(CanvasNodeType.Text, "故事总纲", { x: startX, y: startY }, 460, 260, {
+        content: `# ${options.title}\n\n${options.story}\n\n统一风格：${options.style}`,
+        status: NODE_STATUS_SUCCESS,
+        fontSize: 14,
+    });
+    nodes.push(summaryNode);
+
+    const assetTextNodes = [...characters.map((name, index) => ({ kind: "角色", name, index })), ...scenes.map((name, index) => ({ kind: "场景", name, index }))].map((asset, index) =>
+        createWorkflowNode(CanvasNodeType.Text, `${asset.kind}设定：${asset.name}`, { x: startX, y: startY + 330 + index * 170 }, 390, 140, {
+            content: `${asset.kind}设定：${asset.name}\n用于后续分镜保持一致。风格要求：${options.style}。请保持主体清晰、特征稳定、背景简洁。`,
+            status: NODE_STATUS_SUCCESS,
+            fontSize: 13,
+        }),
+    );
+    nodes.push(...assetTextNodes);
+    assetTextNodes.forEach((node, index) => connections.push(createWorkflowConnection(summaryNode.id, node.id, index)));
+
+    const shotTextNodes = shots.map((shot, index) =>
+        createWorkflowNode(CanvasNodeType.Text, `分镜文案 ${index + 1}`, { x: startX + 500, y: startY + index * 220 }, 360, 135, {
+            content: `分镜 ${index + 1}：${shot}`,
+            status: NODE_STATUS_SUCCESS,
+            fontSize: 13,
+        }),
+    );
+    nodes.push(...shotTextNodes);
+    shotTextNodes.forEach((node, index) => connections.push(createWorkflowConnection(summaryNode.id, node.id, index + 100)));
+
+    const imageConfigNodes = shotTextNodes.map((shotNode, index) =>
+        createWorkflowNode(CanvasNodeType.Config, `分镜生图 ${index + 1}`, { x: startX + 920, y: startY + index * 220 }, 390, 170, {
+            generationMode: "image",
+            generationType: "generation",
+            model: defaults.imageModel,
+            size: defaults.imageSize,
+            count: defaults.imageCount || 1,
+            prompt: buildShotPrompt(shots[index] || shotNode.metadata?.content || "", index, options, characters, scenes),
+            content: shots[index] || "",
+            status: NODE_STATUS_IDLE,
+        }),
+    );
+    nodes.push(...imageConfigNodes);
+    imageConfigNodes.forEach((node, index) => {
+        connections.push(createWorkflowConnection(shotTextNodes[index].id, node.id, index + 200));
+        assetTextNodes.slice(0, 4).forEach((assetNode, assetIndex) => connections.push(createWorkflowConnection(assetNode.id, node.id, index * 10 + assetIndex + 300)));
+    });
+
+    if (options.createVideoNodes) {
+        const videoNodes = shotTextNodes.map((shotNode, index) =>
+            createWorkflowNode(CanvasNodeType.Config, `视频配置 ${index + 1}`, { x: startX + 1380, y: startY + index * 220 }, 370, 165, {
+                generationMode: "video",
+                model: defaults.videoModel,
+                size: defaults.imageSize,
+                seconds: defaults.videoSeconds,
+                vquality: defaults.videoQuality,
+                generateAudio: defaults.videoGenerateAudio,
+                watermark: defaults.videoWatermark,
+                prompt: `基于分镜 ${index + 1} 生成短视频：镜头轻微运动，主体动作自然，保持角色和场景一致。画面描述：${shots[index] || shotNode.metadata?.content || ""}`,
+                content: `由分镜 ${index + 1} 继续生成视频`,
+                status: NODE_STATUS_IDLE,
+            }),
+        );
+        nodes.push(...videoNodes);
+        videoNodes.forEach((node, index) => {
+            connections.push(createWorkflowConnection(shotTextNodes[index].id, node.id, index + 500));
+            assetTextNodes.slice(0, 4).forEach((assetNode, assetIndex) => connections.push(createWorkflowConnection(assetNode.id, node.id, index * 10 + assetIndex + 600)));
+        });
+    }
+
+    return { nodes, connections };
+}
+
+function createWorkflowNode(type: CanvasNodeType, title: string, position: Position, width: number, height: number, metadata: CanvasNodeMetadata): CanvasNodeData {
+    return {
+        ...createCanvasNode(type, { x: position.x + width / 2, y: position.y + height / 2 }, metadata),
+        title,
+        position,
+        width,
+        height,
+    };
+}
+
+function createWorkflowConnection(fromNodeId: string, toNodeId: string, index: number): CanvasConnection {
+    return { id: `story-${Date.now()}-${index}-${Math.random().toString(36).slice(2, 7)}`, fromNodeId, toNodeId };
+}
+
+function splitStorySentences(story: string) {
+    const normalized = story.replace(/\r/g, "\n").replace(/\n{2,}/g, "\n");
+    const parts = normalized
+        .split(/(?<=[。！？!?；;])|\n+/)
+        .map((item) => item.trim())
+        .filter(Boolean);
+    if (parts.length) return parts;
+    return [story.trim()].filter(Boolean);
+}
+
+function buildStoryShots(sentences: string[], count: number) {
+    const safeCount = Math.min(12, Math.max(3, count));
+    const source = sentences.length ? sentences : [""];
+    const chunkSize = Math.max(1, Math.ceil(source.length / safeCount));
+    const shots: string[] = [];
+    for (let i = 0; i < source.length && shots.length < safeCount; i += chunkSize) {
+        shots.push(source.slice(i, i + chunkSize).join(""));
+    }
+    while (shots.length < safeCount) shots.push(source[Math.min(shots.length, source.length - 1)] || "补充分镜画面");
+    return shots.slice(0, safeCount);
+}
+
+const CHARACTER_HINTS = ["少年", "少女", "男人", "女人", "老人", "孩子", "主角", "女孩", "男孩", "队长", "机器人", "猫", "狗", "龙", "公主", "骑士", "侦探", "医生"];
+const SCENE_HINTS = ["城市", "街道", "森林", "房间", "雨夜", "海边", "雪山", "宫殿", "实验室", "飞船", "学校", "咖啡馆", "战场", "村庄", "市场", "办公室"];
+
+function extractStoryKeywords(story: string, hints: string[], limit: number, fallbackPrefix: string) {
+    const hits = hints.filter((hint) => story.includes(hint));
+    const unique = Array.from(new Set(hits)).slice(0, limit);
+    while (unique.length < Math.min(limit, 2)) unique.push(`${fallbackPrefix}${unique.length + 1}`);
+    return unique;
+}
+
+function buildShotPrompt(shot: string, index: number, options: StoryWorkflowOptions, characters: string[], scenes: string[]) {
+    const characterText = characters.length ? `角色参考：${characters.join("、")}。` : "";
+    const sceneText = scenes.length ? `场景参考：${scenes.join("、")}。` : "";
+    return `第 ${index + 1} 个分镜。${shot}\n${characterText}${sceneText}\n统一风格：${options.style}。要求：电影分镜构图，主体清晰，动作明确，角色形象一致，画面可直接用于后续图生视频。`;
 }
 
 type CanvasNodeBounds = { left: number; top: number; right: number; bottom: number; width: number; height: number };
@@ -455,6 +601,7 @@ function InfiniteCanvasPage() {
     const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
     const [runningNodeId, setRunningNodeId] = useState<string | null>(null);
     const [isMiniMapOpen, setIsMiniMapOpen] = useState(false);
+    const [storyWorkflowOpen, setStoryWorkflowOpen] = useState(false);
     const [backgroundMode, setBackgroundMode] = useState<CanvasBackgroundMode>("lines");
     const [showImageInfo, setShowImageInfo] = useState(false);
     const [clearConfirmOpen, setClearConfirmOpen] = useState(false);
@@ -835,6 +982,31 @@ function InfiniteCanvasPage() {
         nodes.forEach((node) => map.set(node.id, buildNodeMentionReferences(node, nodes, connections)));
         return map;
     }, [connections, nodes]);
+
+    const createStoryWorkflow = useCallback(
+        (options: StoryWorkflowOptions) => {
+            const center = getCanvasCenter();
+            const draft = buildStoryWorkflowDraft(options, center, {
+                imageModel: effectiveConfig.imageModel || effectiveConfig.model,
+                videoModel: effectiveConfig.videoModel || effectiveConfig.model,
+                imageSize: effectiveConfig.size,
+                imageCount: getGenerationCount(effectiveConfig.canvasImageCount || effectiveConfig.count),
+                videoSeconds: effectiveConfig.videoSeconds,
+                videoQuality: effectiveConfig.vquality,
+                videoGenerateAudio: effectiveConfig.videoGenerateAudio,
+                videoWatermark: effectiveConfig.videoWatermark,
+            });
+            setNodes((prev) => [...prev, ...draft.nodes]);
+            setConnections((prev) => [...prev, ...draft.connections]);
+            setSelectedNodeIds(new Set(draft.nodes.map((node) => node.id)));
+            setSelectedConnectionId(null);
+            setDialogNodeId(draft.nodes.find((node) => node.type === CanvasNodeType.Config)?.id || null);
+            setStoryWorkflowOpen(false);
+            message.success(`已创建 ${draft.nodes.length} 个故事工作流节点`);
+        },
+        [effectiveConfig.canvasImageCount, effectiveConfig.count, effectiveConfig.imageModel, effectiveConfig.model, effectiveConfig.size, effectiveConfig.videoGenerateAudio, effectiveConfig.videoModel, effectiveConfig.videoSeconds, effectiveConfig.videoWatermark, effectiveConfig.vquality, getCanvasCenter, message],
+    );
+
     const createNode = useCallback(
         (type: CanvasNodeType, position?: Position) => {
             const targetPosition = position || getCanvasCenter();
@@ -2810,6 +2982,7 @@ function InfiniteCanvasPage() {
                     onAddAudio={() => createNode(CanvasNodeType.Audio)}
                     onAddText={() => createNode(CanvasNodeType.Text)}
                     onAddConfig={() => createNode(CanvasNodeType.Config)}
+                    onCreateStoryWorkflow={() => setStoryWorkflowOpen(true)}
                     onUndo={undoCanvas}
                     onRedo={redoCanvas}
                     onUpload={() => handleUploadRequest()}
@@ -2828,6 +3001,8 @@ function InfiniteCanvasPage() {
                     }}
                 />
 
+
+                <StoryWorkflowModal open={storyWorkflowOpen} onCancel={() => setStoryWorkflowOpen(false)} onCreate={createStoryWorkflow} />
                 {isMiniMapOpen ? <Minimap nodes={nodes} viewport={viewport} viewportSize={size} onViewportChange={setViewport} /> : null}
 
                 <CanvasZoomControls scale={viewport.k} onScaleChange={setZoomScale} onReset={resetViewport} isMiniMapOpen={isMiniMapOpen} onToggleMiniMap={() => setIsMiniMapOpen((value) => !value)} />
