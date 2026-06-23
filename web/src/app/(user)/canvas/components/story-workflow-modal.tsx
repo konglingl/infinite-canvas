@@ -83,6 +83,8 @@ export function StoryWorkflowModal({ open, onCancel, onCreate }: StoryWorkflowMo
     const [shotCount, setShotCount] = useState(6);
     const [createVideoNodes, setCreateVideoNodes] = useState(true);
     const [useAiSplit, setUseAiSplit] = useState(true);
+    const selectedTemplate = useMemo(() => WORKFLOW_TEMPLATES.find((template) => template.title === title && template.story === story) || null, [story, title]);
+    const expectedNodeCount = useMemo(() => 1 + 8 + shotCount * (createVideoNodes ? 3 : 2), [createVideoNodes, shotCount]);
     const wordCount = useMemo(() => story.trim().length, [story]);
 
     const applyTemplate = (template: StoryWorkflowTemplate) => {
@@ -132,23 +134,41 @@ export function StoryWorkflowModal({ open, onCancel, onCreate }: StoryWorkflowMo
                         <div className="text-xs text-muted-foreground">点击后自动填入标题、故事、风格和分镜数量</div>
                     </div>
                     <div className="grid gap-2 md:grid-cols-2">
-                        {WORKFLOW_TEMPLATES.map((template) => (
-                            <button
-                                key={template.title}
-                                type="button"
-                                onClick={() => applyTemplate(template)}
-                                className="rounded-xl border border-border bg-background p-3 text-left transition hover:border-purple-300 hover:bg-purple-50/70"
-                            >
-                                <div className="flex items-center justify-between gap-2">
-                                    <span className="text-sm font-medium text-foreground">{template.title}</span>
-                                    <Tag color="purple">{template.tag}</Tag>
-                                </div>
-                                <p className="mt-1 text-xs leading-5 text-muted-foreground">{template.description}</p>
-                                <div className="mt-2 text-xs text-purple-700">
-                                    {template.shotCount} 个分镜 · {template.createVideoNodes ? "含视频节点" : "仅生图节点"}
-                                </div>
-                            </button>
-                        ))}
+                        {WORKFLOW_TEMPLATES.map((template) => {
+                            const active = template.title === selectedTemplate?.title;
+                            return (
+                                <button
+                                    key={template.title}
+                                    type="button"
+                                    aria-pressed={active}
+                                    onClick={() => applyTemplate(template)}
+                                    className={`rounded-xl border p-3 text-left transition ${active ? "border-purple-400 bg-purple-50 shadow-sm" : "border-border bg-background hover:border-purple-300 hover:bg-purple-50/70"}`}
+                                >
+                                    <div className="flex items-center justify-between gap-2">
+                                        <span className="text-sm font-medium text-foreground">{template.title}</span>
+                                        <Tag color={active ? "magenta" : "purple"}>{template.tag}</Tag>
+                                    </div>
+                                    <p className="mt-1 text-xs leading-5 text-muted-foreground">{template.description}</p>
+                                    <div className="mt-2 text-xs text-purple-700">
+                                        {template.shotCount} 个分镜 · {template.createVideoNodes ? "含视频节点" : "仅生图节点"}
+                                    </div>
+                                </button>
+                            );
+                        })}
+                    </div>
+                </div>
+                <div className="rounded-xl border border-purple-200/80 bg-purple-50/70 p-3 text-xs text-purple-900">
+                    <div className="flex flex-wrap items-center gap-2">
+                        <span className="font-medium">模板预览</span>
+                        <Tag color={selectedTemplate ? "purple" : "default"}>{selectedTemplate ? selectedTemplate.tag : "自定义草稿"}</Tag>
+                        <span>{shotCount} 个分镜</span>
+                        <span>·</span>
+                        <span>{createVideoNodes ? "含视频节点" : "仅生图节点"}</span>
+                        <span>·</span>
+                        <span>预计 {expectedNodeCount} 个节点</span>
+                    </div>
+                    <div className="mt-2 line-clamp-2 text-purple-800/80">
+                        {selectedTemplate ? selectedTemplate.story : story || "套用模板或输入故事后，这里会显示即将拆分的工作流预览。"}
                     </div>
                 </div>
                 <Form layout="vertical">
