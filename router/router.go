@@ -33,6 +33,14 @@ func New() *gin.Engine {
 	v1.GET("/models", gin.WrapF(handler.AIModels))
 	v1.POST("/images/generations", gin.WrapF(handler.AIImagesGenerations))
 	v1.POST("/images/edits", gin.WrapF(handler.AIImagesEdits))
+	v1.POST("/images/tasks/generations", gin.WrapF(handler.AIImageGenerationTask))
+	v1.POST("/images/tasks/edits", gin.WrapF(handler.AIImageEditTask))
+	v1.GET("/images/tasks/:id", func(c *gin.Context) {
+		handler.AIImageTask(c.Writer, c.Request, c.Param("id"))
+	})
+	v1.GET("/images/tasks/:id/events", func(c *gin.Context) {
+		handler.AIImageTaskEvents(c.Writer, c.Request, c.Param("id"))
+	})
 	v1.POST("/chat/completions", gin.WrapF(handler.AIChatCompletions))
 	v1.POST("/audio/speech", gin.WrapF(handler.AIAudioSpeech))
 	v1.POST("/videos", gin.WrapF(handler.AIVideos))

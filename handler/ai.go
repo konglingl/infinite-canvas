@@ -30,6 +30,7 @@ type aiProxyLogContext struct {
 	ChannelName     string
 	Credits         int
 	RequestBody     string
+	Stream          bool
 }
 
 func AIImagesGenerations(w http.ResponseWriter, r *http.Request) {
@@ -132,6 +133,7 @@ func proxyAIRequest(w http.ResponseWriter, r *http.Request, path string) {
 	startedAt := time.Now()
 	endpoint := path
 	body, contentType, modelName, err := readAIRequest(r)
+	stream := readAIRequestStream(body, contentType)
 	requestBodyForLog := aiRequestLogBody(body, contentType)
 	if err != nil {
 		log.Printf("AI proxy request read failed: %v", err)
@@ -145,6 +147,7 @@ func proxyAIRequest(w http.ResponseWriter, r *http.Request, path string) {
 		}
 		user, _ := service.UserFromContext(r.Context())
 		logContext := aiProxyLogContextFor(user, endpoint, http.MethodPost, modelName, channel, 0, requestBodyForLog, startedAt, true)
+		logContext.Stream = stream
 		path = resolveAIProxyPath(channel.BaseURL, modelName, path)
 		request, err := http.NewRequest(http.MethodPost, service.BuildModelChannelURL(channel, path), bytes.NewReader(body))
 		if err != nil {
@@ -179,6 +182,7 @@ func proxyAIRequest(w http.ResponseWriter, r *http.Request, path string) {
 		return
 	}
 	logContext := aiProxyLogContextFor(user, endpoint, http.MethodPost, modelName, channel, credits, requestBodyForLog, startedAt, true)
+	logContext.Stream = stream
 	path = resolveAIProxyPath(channel.BaseURL, modelName, path)
 	request, err := http.NewRequest(http.MethodPost, service.BuildModelChannelURL(channel, path), bytes.NewReader(body))
 	if err != nil {
@@ -258,7 +262,7 @@ func copyAIResponse(w http.ResponseWriter, request *http.Request, onFailure func
 	}
 	w.WriteHeader(response.StatusCode)
 
-	written, copyErr := io.Copy(w, response.Body)
+	written, copyErr := copyAIResponseBody(w, response.Body, shouldFlushAIResponse(response.Header.Get("Content-Type"), logContext))
 	if copyErr != nil {
 		log.Printf("AI proxy copy response failed: url=%s err=%v", request.URL.String(), copyErr)
 		saveAIProxyLog(logContext, response.StatusCode, fmt.Sprintf("[response copy failed bytes=%d]", written), copyErr.Error())
@@ -267,9 +271,51 @@ func copyAIResponse(w http.ResponseWriter, request *http.Request, onFailure func
 	saveAIProxyLog(logContext, response.StatusCode, "", "")
 }
 
+func copyAIResponseBody(w http.ResponseWriter, reader io.Reader, flush bool) (int64, error) {
+	if !flush {
+		return io.Copy(w, reader)
+	}
+	flusher, _ := w.(http.Flusher)
+	buffer := make([]byte, 32*1024)
+	var written int64
+	for {
+		n, readErr := reader.Read(buffer)
+		if n > 0 {
+			m, writeErr := w.Write(buffer[:n])
+			written += int64(m)
+			if flusher != nil {
+				flusher.Flush()
+			}
+			if writeErr != nil {
+				return written, writeErr
+			}
+			if m != n {
+				return written, io.ErrShortWrite
+			}
+		}
+		if readErr == io.EOF {
+			return written, nil
+		}
+		if readErr != nil {
+			return written, readErr
+		}
+	}
+}
+
+func shouldFlushAIResponse(contentType string, logContext *aiProxyLogContext) bool {
+	value := strings.ToLower(strings.TrimSpace(contentType))
+	if strings.Contains(value, "event-stream") || strings.HasPrefix(value, "text/event-stream") {
+		return true
+	}
+	return logContext != nil && logContext.Stream
+}
+
 func isAIImageProxyRequest(request *http.Request, logContext *aiProxyLogContext) bool {
 	endpoint := ""
 	if logContext != nil {
+		if logContext.Stream {
+			return false
+		}
 		endpoint = logContext.Endpoint
 	}
 	if isAIImageProxyEndpoint(endpoint) {
@@ -625,6 +671,29 @@ func readAIRequest(r *http.Request) ([]byte, string, string, error) {
 		return nil, "", "", errMissingModel
 	}
 	return body, contentType, modelName, nil
+}
+
+func readAIRequestStream(body []byte, contentType string) bool {
+	if strings.HasPrefix(contentType, "multipart/form-data") {
+		_, params, err := mime.ParseMediaType(contentType)
+		if err != nil {
+			return false
+		}
+		form, err := multipart.NewReader(bytes.NewReader(body), params["boundary"]).ReadForm(32 << 20)
+		if err != nil {
+			return false
+		}
+		defer form.RemoveAll()
+		if values := form.Value["stream"]; len(values) > 0 {
+			return strings.EqualFold(strings.TrimSpace(values[0]), "true")
+		}
+		return false
+	}
+	var payload struct {
+		Stream bool `json:"stream"`
+	}
+	_ = json.Unmarshal(body, &payload)
+	return payload.Stream
 }
 
 func readMultipartModel(body []byte, contentType string) string {
