@@ -23,6 +23,17 @@ export type ImageUpscaleParams = {
     algorithm: ImageUpscaleAlgorithm;
 };
 
+export type ImageSplitParams = {
+    rows: number;
+    columns: number;
+};
+
+export type ImageSplitPiece = {
+    row: number;
+    column: number;
+    dataUrl: string;
+};
+
 export async function cropDataUrl(dataUrl: string, crop?: ImageCropRect) {
     const image = await loadImage(dataUrl);
     if (crop) {
@@ -32,6 +43,23 @@ export async function cropDataUrl(dataUrl: string, crop?: ImageCropRect) {
     const sx = Math.max(0, Math.floor((image.width - size) / 2));
     const sy = Math.max(0, Math.floor((image.height - size) / 2));
     return drawCrop(image, sx, sy, size, size);
+}
+
+export async function splitDataUrl(dataUrl: string, params: ImageSplitParams): Promise<ImageSplitPiece[]> {
+    const image = await loadImage(dataUrl);
+    const rows = Math.max(1, Math.min(12, Math.floor(params.rows || 1)));
+    const columns = Math.max(1, Math.min(12, Math.floor(params.columns || 1)));
+    const pieces: ImageSplitPiece[] = [];
+    for (let row = 0; row < rows; row += 1) {
+        for (let column = 0; column < columns; column += 1) {
+            const sx = Math.floor((image.width * column) / columns);
+            const sy = Math.floor((image.height * row) / rows);
+            const ex = column === columns - 1 ? image.width : Math.floor((image.width * (column + 1)) / columns);
+            const ey = row === rows - 1 ? image.height : Math.floor((image.height * (row + 1)) / rows);
+            pieces.push({ row, column, dataUrl: drawCrop(image, sx, sy, Math.max(1, ex - sx), Math.max(1, ey - sy)) });
+        }
+    }
+    return pieces;
 }
 
 export async function transformAngleDataUrl(dataUrl: string, params: ImageAngleTransform) {

@@ -22,7 +22,7 @@ import { UserStatusActions } from "@/components/layout/user-status-actions";
 import { LocalStorageNotice } from "@/components/local-storage-notice";
 import { useAssetStore } from "@/stores/use-asset-store";
 import { useThemeStore } from "@/stores/use-theme-store";
-import { cropDataUrl, upscaleDataUrl } from "../utils/canvas-image-data";
+import { cropDataUrl, splitDataUrl, upscaleDataUrl } from "../utils/canvas-image-data";
 import { fitNodeSize, nodeSizeFromRatio } from "../utils/canvas-node-size";
 import { App, Button, Dropdown, Modal } from "antd";
 import { NODE_DEFAULT_SIZE, getNodeSpec } from "../constants";
@@ -33,6 +33,7 @@ import { CanvasAssistantPanel } from "../components/canvas-assistant-panel";
 import { CanvasNodeContextMenu } from "../components/canvas-context-menu";
 import { CanvasNodeAngleDialog, type CanvasImageAngleParams } from "../components/canvas-node-angle-dialog";
 import { CanvasNodeCropDialog, type CanvasImageCropRect } from "../components/canvas-node-crop-dialog";
+import { CanvasNodeSplitDialog, type CanvasImageSplitParams } from "../components/canvas-node-split-dialog";
 import { CanvasNodeMaskEditDialog, type CanvasImageMaskEditPayload } from "../components/canvas-node-mask-edit-dialog";
 import { CanvasNodeUpscaleDialog, type CanvasImageUpscaleParams } from "../components/canvas-node-upscale-dialog";
 import { CanvasNodeSuperResolveDialog, type CanvasImageSuperResolveParams } from "../components/canvas-node-super-resolve-dialog";
@@ -746,6 +747,7 @@ function InfiniteCanvasPage() {
     const [editRequestNonce, setEditRequestNonce] = useState(0);
     const [infoNodeId, setInfoNodeId] = useState<string | null>(null);
     const [cropNodeId, setCropNodeId] = useState<string | null>(null);
+    const [splitNodeId, setSplitNodeId] = useState<string | null>(null);
     const [maskEditNodeId, setMaskEditNodeId] = useState<string | null>(null);
     const [upscaleNodeId, setUpscaleNodeId] = useState<string | null>(null);
     const [superResolveNodeId, setSuperResolveNodeId] = useState<string | null>(null);
@@ -2334,6 +2336,29 @@ function InfiniteCanvasPage() {
         setCropNodeId(null);
     }, []);
 
+    const splitImageNode = useCallback(async (node: CanvasNodeData, params: CanvasImageSplitParams) => {
+        if (!node.metadata?.content) return;
+        const pieces = await splitDataUrl(node.metadata.content, params);
+        if (!pieces.length) return;
+        const gap = 36;
+        const childWidth = Math.max(120, Math.min(260, node.width / Math.max(1, params.columns)));
+        const childHeight = Math.max(90, Math.min(260, node.height / Math.max(1, params.rows)));
+        const children: CanvasNodeData[] = pieces.map((piece, index) => ({
+            id: nanoid(),
+            type: CanvasNodeType.Image,
+            title: `图片切分 ${piece.row + 1}-${piece.column + 1}`,
+            position: { x: node.position.x + node.width + 96 + piece.column * (childWidth + gap), y: node.position.y + piece.row * (childHeight + gap) },
+            width: childWidth,
+            height: childHeight,
+            metadata: { content: piece.dataUrl, mimeType: "image/png", prompt: node.metadata?.prompt },
+        }));
+        setNodes((prev) => [...prev, ...children]);
+        setConnections((prev) => [...prev, ...children.map((child) => ({ id: nanoid(), fromNodeId: node.id, toNodeId: child.id }))]);
+        setSelectedNodeIds(new Set(children.map((child) => child.id)));
+        setDialogNodeId(children[0]?.id || null);
+        setSplitNodeId(null);
+    }, []);
+
     const maskEditImageNode = useCallback(
         async (node: CanvasNodeData, payload: CanvasImageMaskEditPayload) => {
             if (!node.metadata?.content) return;
@@ -3306,6 +3331,7 @@ function InfiniteCanvasPage() {
                     onSaveAsset={(node) => void saveNodeAsset(node)}
                     onMaskEdit={(node) => setMaskEditNodeId(node.id)}
                     onCrop={(node) => setCropNodeId(node.id)}
+                            onSplit={(node) => setSplitNodeId(node.id)}
                     onUpscale={(node) => setUpscaleNodeId(node.id)}
                     onSuperResolve={(node) => setSuperResolveNodeId(node.id)}
                     onAngle={(node) => setAngleNodeId(node.id)}
@@ -3451,6 +3477,15 @@ function InfiniteCanvasPage() {
                 <input ref={imageInputRef} type="file" accept="image/*,video/*,audio/mpeg,audio/wav,audio/x-wav,.mp3,.wav" className="hidden" onChange={handleImageInputChange} />
 
                 <CanvasNodeInfoModal node={infoNode} open={Boolean(infoNode)} onClose={() => setInfoNodeId(null)} />
+
+                {splitNode?.metadata?.content ? (
+                    <CanvasNodeSplitDialog
+                        dataUrl={splitNode.metadata.content}
+                        open={Boolean(splitNode)}
+                        onClose={() => setSplitNodeId(null)}
+                        onConfirm={(params) => void splitImageNode(splitNode, params)}
+                    />
+                ) : null}
 
                 {cropNode?.metadata?.content ? <CanvasNodeCropDialog dataUrl={cropNode.metadata.content} open={Boolean(cropNode)} onClose={() => setCropNodeId(null)} onConfirm={(crop) => void cropImageNode(cropNode!, crop)} /> : null}
 
