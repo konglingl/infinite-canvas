@@ -254,6 +254,23 @@ export default function VideoStudioPage() {
         message.success("已加入时间线");
     };
 
+    const addAudioPlaceholderClip = (kind: "voice" | "audio") => {
+        const clipId = nanoid();
+        setProject((value) => {
+            const source = normalizeVideoStudioProject(value);
+            const trackIndex = source.tracks.findIndex((track) => track.kind === kind);
+            if (trackIndex < 0) return source;
+            const track = source.tracks[trackIndex];
+            if (track.locked) return source;
+            const startMs = track.clips.reduce((max, clip) => Math.max(max, clip.startMs + clip.durationMs), 0);
+            const clip: VideoStudioClip = { id: clipId, trackId: track.id, kind, title: kind === "voice" ? "旁白占位" : "音效占位", startMs, durationMs: 3000, volume: 100, muted: false };
+            const tracks = source.tracks.map((item, index) => (index === trackIndex ? { ...item, clips: [...item.clips, clip] } : item));
+            return { ...source, tracks, durationMs: Math.max(source.durationMs, startMs + clip.durationMs), updatedAt: Date.now() };
+        });
+        setSelectedClipId(clipId);
+        message.success(kind === "voice" ? "已新增旁白占位" : "已新增音效占位");
+    };
+
     const addSubtitleClip = () => {
         const clipId = nanoid();
         setProject((value) => {
