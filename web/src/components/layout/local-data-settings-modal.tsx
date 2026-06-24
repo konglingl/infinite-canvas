@@ -12,13 +12,14 @@ import { clearDefaultBrowserCache } from "@/services/browser-cache-cleanup";
 import { createFullLocalDataBackup, restoreFullLocalDataBackup, type FullLocalBackupExtraFile } from "@/services/local-full-backup";
 import { chooseLocalBackupFolder, forgetLocalBackupFolder, getLocalAutoBackupSettings, getLocalBackupFolderInfo, isLocalBackupFolderSupported, saveBlobToLocalBackupFolder, saveLocalAutoBackupSettings, type AutoBackupMediaKind, type LocalAutoBackupSettings, type LocalBackupFolderInfo } from "@/services/local-backup-folder";
 import { useAssetStore } from "@/stores/use-asset-store";
+import { defaultWebdavBackupConfig, getWebdavBackupConfig, saveWebdavBackupConfig, testWebdavBackupConnection, uploadWebdavBackupFile, type WebdavBackupConfig } from "@/services/webdav-backup";
 
 type LocalDataSettingsModalProps = {
     open: boolean;
     onClose: () => void;
 };
 
-type LoadingAction = "chooseFolder" | "forgetFolder" | "backupAll" | "downloadAll" | "importAll" | "backupCanvas" | "downloadCanvas" | "importCanvas" | "backupAssets" | "downloadAssets" | "importAssets" | "clearCache" | null;
+type LoadingAction = "chooseFolder" | "forgetFolder" | "backupAll" | "downloadAll" | "importAll" | "backupWebdav" | "testWebdav" | "backupCanvas" | "downloadCanvas" | "importCanvas" | "backupAssets" | "downloadAssets" | "importAssets" | "clearCache" | null;
 
 export function LocalDataSettingsModal({ open, onClose }: LocalDataSettingsModalProps) {
     const { message, modal } = App.useApp();
@@ -29,6 +30,7 @@ export function LocalDataSettingsModal({ open, onClose }: LocalDataSettingsModal
     const [backupFolder, setBackupFolder] = useState<LocalBackupFolderInfo | null>(null);
     const [folderSupported, setFolderSupported] = useState(false);
     const [autoBackupSettings, setAutoBackupSettings] = useState<LocalAutoBackupSettings | null>(null);
+    const [webdavConfig, setWebdavConfig] = useState<WebdavBackupConfig>(defaultWebdavBackupConfig);
     const canvasProjects = useCanvasStore((state) => state.projects);
     const importProject = useCanvasStore((state) => state.importProject);
     const assets = useAssetStore((state) => state.assets);
@@ -39,6 +41,7 @@ export function LocalDataSettingsModal({ open, onClose }: LocalDataSettingsModal
         if (!open) return;
         const supported = isLocalBackupFolderSupported();
         void getLocalAutoBackupSettings().then(setAutoBackupSettings).catch(() => setAutoBackupSettings(null));
+        void getWebdavBackupConfig().then(setWebdavConfig).catch(() => setWebdavConfig(defaultWebdavBackupConfig));
         setFolderSupported(supported);
         if (!supported) {
             setBackupFolder(null);
@@ -128,6 +131,25 @@ export function LocalDataSettingsModal({ open, onClose }: LocalDataSettingsModal
             const backup = await createCompleteBackup();
             saveAs(backup.blob, backup.fileName);
             message.success("全部本地业务数据备份已开始下载");
+        });
+
+    const updateWebdavConfig = (patch: Partial<WebdavBackupConfig>) => {
+        const next = { ...webdavConfig, ...patch };
+        setWebdavConfig(next);
+        void saveWebdavBackupConfig(next);
+    };
+
+    const testWebdav = () =>
+        runAction("testWebdav", async () => {
+            await testWebdavBackupConnection(webdavConfig);
+            message.success("WebDAV 连接成功");
+        });
+
+    const backupAllToWebdav = () =>
+        runAction("backupWebdav", async () => {
+            const backup = await createCompleteBackup();
+            const uploaded = await uploadWebdavBackupFile(webdavConfig, backup.fileName, backup.blob);
+            message.success(`全部本地业务数据已上传到 WebDAV：${uploaded.path}`);
         });
 
     const importAllZip = (file?: File) => {
@@ -359,6 +381,9 @@ export function LocalDataSettingsModal({ open, onClose }: LocalDataSettingsModal
                             </Button>
                             <Button icon={<FileUp className="size-4" />} loading={loadingAction === "importAll"} onClick={() => fullInputRef.current?.click()}>
                                 恢复全部备份包
+                            </Button>
+                            <Button icon={<Archive className="size-4" />} loading={loadingAction === "backupWebdav"} disabled={!webdavConfig.enabled} onClick={backupAllToWebdav}>
+                                上传到 WebDAV
                             </Button>
                         </div>
                     </div>
