@@ -1317,6 +1317,14 @@ function InfiniteCanvasPage() {
         [chatSessions, cleanupCanvasFiles, projectId],
     );
 
+    const deleteNodeOrSelection = useCallback(
+        (nodeId: string) => {
+            const selectedIds = selectedNodeIdsRef.current;
+            deleteNodes(selectedIds.has(nodeId) && selectedIds.size > 1 ? new Set(selectedIds) : new Set([nodeId]));
+        },
+        [deleteNodes],
+    );
+
     const deleteConnection = useCallback((connectionId: string) => {
         setConnections((prev) => prev.filter((conn) => conn.id !== connectionId));
         setSelectedConnectionId((current) => (current === connectionId ? null : current));
@@ -3375,7 +3383,7 @@ function InfiniteCanvasPage() {
                     onReversePrompt={createImageReversePromptNodes}
                     onRetry={(node) => void handleRetryNode(node)}
                     onToggleFreeResize={(node) => toggleNodeFreeResize(node.id)}
-                    onDelete={(node) => deleteNodes(new Set([node.id]))}
+                    onDelete={(node) => deleteNodeOrSelection(node.id)}
                 />
 
                 <CanvasToolbar
@@ -3496,7 +3504,7 @@ function InfiniteCanvasPage() {
                         }}
                         onDelete={() => {
                             if (contextMenu.type === "node") {
-                                deleteNodes(new Set([contextMenu.nodeId]));
+                                deleteNodeOrSelection(contextMenu.nodeId);
                             } else {
                                 deleteConnection(contextMenu.connectionId);
                             }
