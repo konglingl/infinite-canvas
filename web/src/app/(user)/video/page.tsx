@@ -2,6 +2,7 @@
 
 import { ArrowLeft, ArrowRight, BookOpen, CheckSquare, ClipboardPaste, Download, FolderPlus, History, LoaderCircle, Music2, Plus, SlidersHorizontal, Sparkles, Trash2, Upload, VideoIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { App, Button, Checkbox, Drawer, Empty, Input, Modal, Tag, Typography } from "antd";
 import localforage from "localforage";
 import { nanoid } from "nanoid";
@@ -73,6 +74,7 @@ const LOG_STORE_KEY = "infinite-canvas:video_generation_logs";
 const logStore = localforage.createInstance({ name: "infinite-canvas", storeName: "video_generation_logs" });
 
 export default function VideoPage() {
+    const router = useRouter();
     const { message } = App.useApp();
     const fileInputRef = useRef<HTMLInputElement>(null);
     const abortControllerRef = useRef<AbortController | null>(null);
@@ -326,6 +328,9 @@ export default function VideoPage() {
                                 </Button>
                                 <Button icon={<SlidersHorizontal className="size-4" />} onClick={() => setSettingsOpen(true)}>
                                     参数
+                                </Button>
+                                <Button icon={<VideoIcon className="size-4" />} onClick={() => router.push("/video-studio")}>
+                                    视频编辑器
                                 </Button>
                             </div>
                         </div>

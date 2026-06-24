@@ -6,14 +6,17 @@ import { ArrowLeft, Film, Layers3, Library, Plus, Sparkles } from "lucide-react"
 import { useRouter } from "next/navigation";
 import { nanoid } from "nanoid";
 
-import { defaultVideoStudioProject, type VideoStudioProject } from "./types";
+import { defaultVideoStudioProject, type VideoStudioAssetRef, type VideoStudioProject } from "./types";
 import { listVideoStudioProjects, saveVideoStudioProject } from "./storage";
+import { useAssetStore, type Asset } from "@/stores/use-asset-store";
 
 export default function VideoStudioPage() {
     const router = useRouter();
     const { message } = App.useApp();
     const [project, setProject] = useState<VideoStudioProject>(() => defaultVideoStudioProject(nanoid(), "视频编辑器迁移预览"));
     const [projects, setProjects] = useState<VideoStudioProject[]>([]);
+    const assets = useAssetStore((state) => state.assets);
+    const mediaAssets = assets.filter((asset) => asset.kind === "image" || asset.kind === "video");
 
     const refreshProjects = async () => setProjects(await listVideoStudioProjects());
 
@@ -31,6 +34,15 @@ export default function VideoStudioPage() {
     const createProject = () => {
         setProject(defaultVideoStudioProject(nanoid(), "未命名视频工程"));
         message.info("已新建空白视频工程");
+    };
+
+    const addAssetToProject = (asset: Asset) => {
+        if (asset.kind !== "image" && asset.kind !== "video") return;
+        const nextAsset: VideoStudioAssetRef = asset.kind === "image"
+            ? { id: asset.id, kind: "image", title: asset.title, url: asset.data.dataUrl, storageKey: asset.data.storageKey, width: asset.data.width, height: asset.data.height, mimeType: asset.data.mimeType }
+            : { id: asset.id, kind: "video", title: asset.title, url: asset.data.url, storageKey: asset.data.storageKey, width: asset.data.width, height: asset.data.height, mimeType: asset.data.mimeType };
+        setProject((value) => ({ ...value, assets: [nextAsset, ...value.assets.filter((item) => item.id !== nextAsset.id)], updatedAt: Date.now() }));
+        message.success("已加入当前视频工程");
     };
 
     return (
@@ -58,7 +70,23 @@ export default function VideoStudioPage() {
                         <div className="flex items-center gap-2 font-medium"><Library className="size-4" />素材库</div>
                         <Button size="small" icon={<Plus className="size-3.5" />} disabled>导入</Button>
                     </div>
-                    <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={<span className="text-slate-400">后续接入当前资产库 / file-storage</span>} />
+                    {mediaAssets.length ? (
+                        <div className="space-y-2">
+                            {mediaAssets.slice(0, 24).map((asset) => (
+                                <div key={asset.id} className="rounded-lg border border-white/10 bg-white/[0.03] p-2">
+                                    <div className="flex items-center justify-between gap-2">
+                                        <div className="min-w-0">
+                                            <div className="truncate text-sm text-slate-100">{asset.title}</div>
+                                            <div className="mt-0.5 text-xs text-slate-500">{asset.kind === "image" ? "图片" : "视频"}</div>
+                                        </div>
+                                        <Button size="small" onClick={() => addAssetToProject(asset)}>加入</Button>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    ) : (
+                        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={<span className="text-slate-400">暂无图片/视频素材；后续会接入更多素材来源</span>} />
+                    )}
                     <div className="mt-6">
                         <div className="mb-2 text-sm font-medium text-slate-300">本地工程</div>
                         <div className="space-y-2">
@@ -83,6 +111,10 @@ export default function VideoStudioPage() {
                         </div>
                         <aside className="rounded-2xl border border-white/10 bg-slate-900/70 p-4">
                             <div className="mb-3 flex items-center gap-2 font-medium"><Layers3 className="size-4" />工程结构</div>
+                            <div className="mb-4 rounded-xl border border-white/10 bg-white/[0.03] p-3">
+                                <div className="mb-2 text-sm font-medium">工程素材</div>
+                                {project.assets.length ? <div className="flex flex-wrap gap-2">{project.assets.map((asset) => <Tag key={asset.id} color={asset.kind === "video" ? "blue" : "purple"}>{asset.title}</Tag>)}</div> : <div className="text-xs text-slate-500">尚未加入素材</div>}
+                            </div>
                             <div className="space-y-2">
                                 {project.tracks.map((track) => (
                                     <div key={track.id} className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
