@@ -27,6 +27,12 @@ export type VideoStudioClip = {
     text?: string;
     volume?: number;
     muted?: boolean;
+    xPct?: number;
+    yPct?: number;
+    widthPct?: number;
+    heightPct?: number;
+    borderRadiusPct?: number;
+    opacity?: number;
 };
 
 export type VideoStudioTrack = {

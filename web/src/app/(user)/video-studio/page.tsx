@@ -60,6 +60,15 @@ function previewBoxSize(aspectRatio: VideoStudioProject["aspectRatio"]) {
     return { width: 520, height: 292 };
 }
 
+function clampPercent(value: number, fallback: number) {
+    if (!Number.isFinite(value)) return fallback;
+    return Math.min(100, Math.max(0, value));
+}
+
+function percentInput(value: number | undefined, fallback: number, onChange: (value: number) => void) {
+    return <Input size="small" type="number" min={0} max={100} value={value ?? fallback} onChange={(event) => onChange(clampPercent(Number(event.target.value), fallback))} />;
+}
+
 export default function VideoStudioPage() {
     const router = useRouter();
     const { message } = App.useApp();
@@ -73,6 +82,7 @@ export default function VideoStudioPage() {
     const selectedAsset = selectedClipInfo?.clip.assetId ? project.assets.find((asset) => asset.id === selectedClipInfo.clip.assetId) : undefined;
     const previewClipInfo = useMemo(() => findPreviewClip(project, selectedClipId), [project, selectedClipId]);
     const previewAsset = previewClipInfo?.clip.assetId ? project.assets.find((asset) => asset.id === previewClipInfo.clip.assetId) : undefined;
+    const overlayClips = useMemo(() => project.tracks.find((track) => track.kind === "overlay")?.clips || [], [project.tracks]);
 
     const refreshProjects = async () => setProjects((await listVideoStudioProjects()).map(normalizeVideoStudioProject));
 
@@ -216,6 +226,22 @@ export default function VideoStudioPage() {
         message.success("已加入时间线");
     };
 
+    const addAssetToOverlayTrack = (asset: VideoStudioAssetRef) => {
+        const clipId = nanoid();
+        setProject((value) => {
+            const source = normalizeVideoStudioProject(value);
+            const trackIndex = source.tracks.findIndex((track) => track.kind === "overlay");
+            if (trackIndex < 0) return source;
+            const track = source.tracks[trackIndex];
+            const startMs = track.clips.reduce((max, clip) => Math.max(max, clip.startMs + clip.durationMs), 0);
+            const clip: VideoStudioClip = { id: clipId, trackId: track.id, assetId: asset.id, kind: "overlay", title: asset.title, startMs, durationMs: 3000, xPct: 64, yPct: 58, widthPct: 28, heightPct: 28, borderRadiusPct: 8, opacity: 100 };
+            const tracks = source.tracks.map((item, index) => (index === trackIndex ? { ...item, clips: [...item.clips, clip] } : item));
+            return { ...source, tracks, durationMs: Math.max(source.durationMs, startMs + clip.durationMs), updatedAt: Date.now() };
+        });
+        setSelectedClipId(clipId);
+        message.success("????????");
+    };
+
     const previewSize = previewBoxSize(project.aspectRatio);
 
     return (
@@ -296,6 +322,14 @@ export default function VideoStudioPage() {
                                         </div>
                                     </div>
                                 )}
+                                {overlayClips.map((clip) => {
+                                    const asset = clip.assetId ? project.assets.find((item) => item.id === clip.assetId) : undefined;
+                                    if (!asset?.url) return null;
+                                    const style = { left: `${clip.xPct ?? 64}%`, top: `${clip.yPct ?? 58}%`, width: `${clip.widthPct ?? 28}%`, height: `${clip.heightPct ?? 28}%`, borderRadius: `${clip.borderRadiusPct ?? 8}%`, opacity: (clip.opacity ?? 100) / 100 };
+                                    return <button key={clip.id} type="button" className={`absolute overflow-hidden border border-white/40 bg-black/20 shadow-xl ${selectedClipId === clip.id ? "ring-2 ring-fuchsia-300" : ""}`} style={style} onClick={() => setSelectedClipId(clip.id)} title="???/????">
+                                        {asset.kind === "video" ? <video src={asset.url} className="size-full object-cover" muted playsInline /> : <img src={asset.url} alt={asset.title} className="size-full object-cover" />}
+                                    </button>;
+                                })}
                                 {previewClipInfo ? (
                                     <div className="absolute inset-x-3 bottom-3 rounded-lg bg-black/65 px-3 py-2 text-xs text-white backdrop-blur">
                                         <div className="truncate font-medium">{previewClipInfo.clip.title || previewClipInfo.clip.kind}</div>
