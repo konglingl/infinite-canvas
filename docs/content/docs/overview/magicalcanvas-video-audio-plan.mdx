@@ -1,0 +1,52 @@
+﻿---
+title: MagicalCanvas 视频音频模块适配计划
+---
+
+# MagicalCanvas 视频音频模块适配计划
+
+记录时间：2026-06-24。
+
+## 上游来源
+
+- `https://github.com/28998306/MagicalCanvas`
+- 本地源码：`_upstreams_20260624/MagicalCanvas`
+- 已生成清单：`_upstreams_20260624/MagicalCanvas_video_audio_inventory_20260624.md`
+
+## 已识别核心模块
+
+- `src/components/videoStudio/VideoStudioPage.tsx`
+- `src/components/modals/VideoEditorModal.tsx`
+- `src/components/modals/StoryboardVideoModal.tsx`
+- `src/components/modals/StoryWorkflowModal.tsx`
+- `src/hooks/useVideoEditor.ts`
+- `src/hooks/useVideoFrameExtraction.ts`
+- `src/utils/videoHelpers.ts`
+- `server/routes/video-studio.js`
+- `server/routes/storyboard.js`
+
+## 不直接整包合并的原因
+
+MagicalCanvas 的视频/音频编辑功能依赖它自己的 Node/Express 路由、素材库接口、编辑项目持久化、OpenAI TTS/转写、FFmpeg/视频处理路径。当前项目使用 Next 前端、Go 后端、固定中转站、算力点、IndexedDB/本地备份和既有 `/video` 工作台。直接复制会破坏现有视频/音频入口和账号/计费/备份链路。
+
+## 分阶段迁移策略
+
+1. UI 壳与数据结构
+   - 先迁移时间线、轨道、片段、字幕、旁白、画中画等 TypeScript 数据结构。
+   - UI 先作为独立页面或 `/video` 子模块接入，不替换现有视频生成页面。
+
+2. 素材库适配
+   - 将 MagicalCanvas 的素材引用改为当前项目 `file-storage` / `image-storage` / `asset-store`。
+   - 生成视频、音频、图片仍走当前项目本地备份体系。
+
+3. 服务端适配
+   - `server/routes/video-studio.js`、`server/routes/storyboard.js` 不直接迁移。
+   - 需要逐项映射到当前 Go 路由或 Next API route。
+   - FFmpeg/export/TTS/transcription 单独做能力探测和开关。
+
+4. 一键故事工作流增强
+   - 可优先迁移提示词模板、旁白/台词说话人标注、分镜密度优化等纯前端/提示词逻辑。
+   - 已有自定义故事模板功能需继续保留，并纳入画布备份。
+
+## 当前合并结论
+
+本批次只记录适配计划，不直接导入 MagicalCanvas 视频编辑器源码。后续建议以“UI 壳 + 数据结构”作为第一个专项分支，构建通过后再逐步接服务端能力。
