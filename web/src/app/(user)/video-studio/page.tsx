@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { App, Button, Empty, Input, Tag } from "antd";
+import { App, Button, Empty, Input, Segmented, Tag } from "antd";
 import { ArrowLeft, Film, Layers3, Library, Plus, Sparkles } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { nanoid } from "nanoid";
@@ -45,6 +45,15 @@ export default function VideoStudioPage() {
         message.success("已加入当前视频工程");
     };
 
+    const setProjectAspectRatio = (aspectRatio: VideoStudioProject["aspectRatio"]) => {
+        const size = aspectRatio === "9:16" ? { width: 720, height: 1280 } : aspectRatio === "1:1" ? { width: 1080, height: 1080 } : { width: 1280, height: 720 };
+        setProject((value) => ({ ...value, aspectRatio, ...size, updatedAt: Date.now() }));
+    };
+
+    const removeClip = (trackId: string, clipId: string) => {
+        setProject((value) => ({ ...value, tracks: value.tracks.map((track) => (track.id === trackId ? { ...track, clips: track.clips.filter((clip) => clip.id !== clipId) } : track)), updatedAt: Date.now() }));
+    };
+
     const addAssetToTimeline = (asset: VideoStudioAssetRef) => {
         const targetKind = asset.kind === "video" ? "video" : "image";
         setProject((value) => {
@@ -70,7 +79,7 @@ export default function VideoStudioPage() {
                     </div>
                 </div>
                 <div className="flex flex-wrap items-center justify-end gap-2">
-                    <Tag color="purple">{project.aspectRatio}</Tag>
+                    <Segmented size="small" value={project.aspectRatio} options={["16:9", "9:16", "1:1"]} onChange={(value) => setProjectAspectRatio(value as VideoStudioProject["aspectRatio"])} />
                     <Tag color="blue">{project.width}×{project.height}</Tag>
                     <Tag color="default">{Math.round(project.durationMs / 1000)}s</Tag>
                     <Button size="small" onClick={createProject}>新建</Button>
@@ -116,11 +125,13 @@ export default function VideoStudioPage() {
 
                 <div className="flex min-w-0 flex-col">
                     <div className="grid flex-1 grid-cols-[minmax(0,1fr)_320px] gap-4 p-4">
-                        <div className="flex min-h-[420px] items-center justify-center rounded-2xl border border-white/10 bg-black/50 shadow-inner">
+                        <div className="flex min-h-[420px] items-center justify-center rounded-2xl border border-white/10 bg-black/50 p-6 shadow-inner">
+                            <div className="relative grid place-items-center rounded-xl border border-white/10 bg-slate-950 shadow-2xl" style={{ width: project.aspectRatio === "9:16" ? 236 : project.aspectRatio === "1:1" ? 360 : 520, height: project.aspectRatio === "9:16" ? 420 : project.aspectRatio === "1:1" ? 360 : 292 }}>
                             <div className="text-center">
                                 <Sparkles className="mx-auto mb-3 size-10 text-purple-300" />
                                 <div className="text-lg font-semibold">预览画布</div>
                                 <p className="mt-2 max-w-md text-sm text-slate-400">下一阶段会迁移 MagicalCanvas 的时间线预览、画中画、字幕气泡和多轨音频控制；当前只落地 UI 壳和数据结构。</p>
+                            </div>
                             </div>
                         </div>
                         <aside className="rounded-2xl border border-white/10 bg-slate-900/70 p-4">
@@ -152,7 +163,7 @@ export default function VideoStudioPage() {
                             {project.tracks.map((track) => (
                                 <div key={track.id} className="grid grid-cols-[96px_minmax(0,1fr)] items-center gap-3">
                                     <div className="truncate text-xs text-slate-400">{track.name}</div>
-                                    <div className="flex h-10 items-center gap-1 rounded-lg border border-dashed border-white/10 bg-white/[0.03] px-1">{track.clips.map((clip) => <div key={clip.id} className="flex h-7 min-w-20 items-center rounded bg-purple-500/30 px-2 text-xs text-purple-50" style={{ width: `${Math.max(80, clip.durationMs / 40)}px` }} title={clip.title}>{clip.title || clip.kind}</div>)}</div>
+                                    <div className="flex h-10 items-center gap-1 rounded-lg border border-dashed border-white/10 bg-white/[0.03] px-1">{track.clips.map((clip) => <button key={clip.id} type="button" className="flex h-7 min-w-20 items-center rounded bg-purple-500/30 px-2 text-left text-xs text-purple-50 hover:bg-red-500/40" style={{ width: `${Math.max(80, clip.durationMs / 40)}px` }} title="点击删除片段" onClick={() => removeClip(track.id, clip.id)}>{clip.title || clip.kind}</button>)}</div>
                                 </div>
                             ))}
                         </div>
