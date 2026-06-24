@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { App, Button, Empty, Input, Segmented, Tag } from "antd";
 import { ArrowLeft, Film, Layers3, Library, Plus, Sparkles } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { nanoid } from "nanoid";
+import { saveAs } from "file-saver";
 
 import { defaultVideoStudioProject, type VideoStudioAssetRef, type VideoStudioProject } from "./types";
 import { listVideoStudioProjects, saveVideoStudioProject } from "./storage";
@@ -13,6 +14,7 @@ import { useAssetStore, type Asset } from "@/stores/use-asset-store";
 export default function VideoStudioPage() {
     const router = useRouter();
     const { message } = App.useApp();
+    const importProjectRef = useRef<HTMLInputElement>(null);
     const [project, setProject] = useState<VideoStudioProject>(() => defaultVideoStudioProject(nanoid(), "视频编辑器迁移预览"));
     const [projects, setProjects] = useState<VideoStudioProject[]>([]);
     const assets = useAssetStore((state) => state.assets);
@@ -29,6 +31,21 @@ export default function VideoStudioPage() {
         setProject(saved);
         await refreshProjects();
         message.success("视频工程已保存到本地");
+    };
+
+    const exportProject = () => {
+        const blob = new Blob([JSON.stringify({ type: "infinite-canvas-video-studio-project", version: 1, project }, null, 2)], { type: "application/json" });
+        saveAs(blob, `${project.title || "video-studio-project"}.json`);
+    };
+
+    const importProject = async (file?: File) => {
+        if (!file) return;
+        const payload = JSON.parse(await file.text()) as { type?: string; project?: VideoStudioProject };
+        if (payload.type !== "infinite-canvas-video-studio-project" || !payload.project?.id) throw new Error("不是有效的视频工程文件");
+        const next = await saveVideoStudioProject({ ...payload.project, id: payload.project.id || nanoid(), updatedAt: Date.now() });
+        setProject(next);
+        await refreshProjects();
+        message.success("视频工程已导入");
     };
 
     const createProject = () => {
@@ -97,6 +114,7 @@ export default function VideoStudioPage() {
 
     return (
         <main className="min-h-screen bg-slate-950 text-slate-100">
+            <input ref={importProjectRef} type="file" accept="application/json,.json" className="hidden" onChange={(event) => void importProject(event.target.files?.[0]).finally(() => { event.currentTarget.value = ""; })} />
             <header className="flex items-center justify-between border-b border-white/10 px-6 py-4">
                 <div className="flex items-center gap-3">
                     <Button size="small" icon={<ArrowLeft className="size-4" />} onClick={() => router.push("/video")}>返回视频生成</Button>
@@ -110,6 +128,8 @@ export default function VideoStudioPage() {
                     <Tag color="blue">{project.width}×{project.height}</Tag>
                     <Tag color="default">{Math.round(project.durationMs / 1000)}s</Tag>
                     <Button size="small" onClick={createProject}>新建</Button>
+                    <Button size="small" onClick={exportProject}>导出</Button>
+                    <Button size="small" onClick={() => importProjectRef.current?.click()}>导入</Button>
                     <Button size="small" type="primary" onClick={() => void saveProject()}>保存工程</Button>
                 </div>
             </header>
