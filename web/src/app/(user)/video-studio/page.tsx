@@ -1,0 +1,84 @@
+"use client";
+
+import { useMemo } from "react";
+import { Button, Empty, Tag } from "antd";
+import { ArrowLeft, Film, Layers3, Library, Plus, Sparkles } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { nanoid } from "nanoid";
+
+import { defaultVideoStudioProject } from "./types";
+
+export default function VideoStudioPage() {
+    const router = useRouter();
+    const project = useMemo(() => defaultVideoStudioProject(nanoid(), "视频编辑器迁移预览"), []);
+
+    return (
+        <main className="min-h-screen bg-slate-950 text-slate-100">
+            <header className="flex items-center justify-between border-b border-white/10 px-6 py-4">
+                <div className="flex items-center gap-3">
+                    <Button size="small" icon={<ArrowLeft className="size-4" />} onClick={() => router.push("/video")}>返回视频生成</Button>
+                    <div>
+                        <div className="flex items-center gap-2 text-lg font-semibold"><Film className="size-5 text-purple-300" />{project.title}</div>
+                        <div className="mt-0.5 text-xs text-slate-400">MagicalCanvas 视频/音频编辑模块迁移壳 · 暂不替换现有 /video</div>
+                    </div>
+                </div>
+                <div className="flex items-center gap-2">
+                    <Tag color="purple">{project.aspectRatio}</Tag>
+                    <Tag color="blue">{project.width}×{project.height}</Tag>
+                    <Tag color="default">{Math.round(project.durationMs / 1000)}s</Tag>
+                </div>
+            </header>
+
+            <section className="grid min-h-[calc(100vh-65px)] grid-cols-[280px_minmax(0,1fr)]">
+                <aside className="border-r border-white/10 bg-slate-900/70 p-4">
+                    <div className="mb-3 flex items-center justify-between">
+                        <div className="flex items-center gap-2 font-medium"><Library className="size-4" />素材库</div>
+                        <Button size="small" icon={<Plus className="size-3.5" />} disabled>导入</Button>
+                    </div>
+                    <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={<span className="text-slate-400">后续接入当前资产库 / file-storage</span>} />
+                </aside>
+
+                <div className="flex min-w-0 flex-col">
+                    <div className="grid flex-1 grid-cols-[minmax(0,1fr)_320px] gap-4 p-4">
+                        <div className="flex min-h-[420px] items-center justify-center rounded-2xl border border-white/10 bg-black/50 shadow-inner">
+                            <div className="text-center">
+                                <Sparkles className="mx-auto mb-3 size-10 text-purple-300" />
+                                <div className="text-lg font-semibold">预览画布</div>
+                                <p className="mt-2 max-w-md text-sm text-slate-400">下一阶段会迁移 MagicalCanvas 的时间线预览、画中画、字幕气泡和多轨音频控制；当前只落地 UI 壳和数据结构。</p>
+                            </div>
+                        </div>
+                        <aside className="rounded-2xl border border-white/10 bg-slate-900/70 p-4">
+                            <div className="mb-3 flex items-center gap-2 font-medium"><Layers3 className="size-4" />工程结构</div>
+                            <div className="space-y-2">
+                                {project.tracks.map((track) => (
+                                    <div key={track.id} className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
+                                        <div className="flex items-center justify-between text-sm">
+                                            <span>{track.name}</span>
+                                            <Tag className="m-0" color="geekblue">{track.kind}</Tag>
+                                        </div>
+                                        <div className="mt-2 text-xs text-slate-500">{track.clips.length ? `${track.clips.length} 个片段` : "暂无片段"}</div>
+                                    </div>
+                                ))}
+                            </div>
+                        </aside>
+                    </div>
+
+                    <footer className="border-t border-white/10 bg-slate-900/80 p-4">
+                        <div className="mb-2 flex items-center justify-between text-sm">
+                            <span className="font-medium">时间线</span>
+                            <span className="text-slate-500">多轨视频 / 旁白 / 音乐 / 字幕</span>
+                        </div>
+                        <div className="space-y-2">
+                            {project.tracks.map((track) => (
+                                <div key={track.id} className="grid grid-cols-[96px_minmax(0,1fr)] items-center gap-3">
+                                    <div className="truncate text-xs text-slate-400">{track.name}</div>
+                                    <div className="h-10 rounded-lg border border-dashed border-white/10 bg-white/[0.03]" />
+                                </div>
+                            ))}
+                        </div>
+                    </footer>
+                </div>
+            </section>
+        </main>
+    );
+}
