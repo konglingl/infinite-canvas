@@ -75,6 +75,7 @@ const logStore = localforage.createInstance({ name: "infinite-canvas", storeName
 export default function VideoPage() {
     const { message } = App.useApp();
     const fileInputRef = useRef<HTMLInputElement>(null);
+    const abortControllerRef = useRef<AbortController | null>(null);
     const config = useConfigStore((state) => state.config);
     const effectiveConfig = useEffectiveConfig();
     const updateConfig = useConfigStore((state) => state.updateConfig);
@@ -183,7 +184,7 @@ export default function VideoPage() {
         const batchStartedAt = performance.now();
         setStartedAt(batchStartedAt);
         try {
-            const stored = await storeGeneratedVideo(await requestVideoGeneration(snapshot.config, snapshot.text, snapshot.references, snapshot.videoReferences, snapshot.audioReferences), { prompt: snapshot.text, model: model, source: "video-page" });
+            const stored = await storeGeneratedVideo(await requestVideoGeneration(snapshot.config, snapshot.text, snapshot.references, snapshot.videoReferences, snapshot.audioReferences, { signal: abortController.signal }), { prompt: snapshot.text, model: model, source: "video-page" });
             const nextVideo: GeneratedVideo = {
                 id: nanoid(),
                 url: stored.url,
@@ -203,6 +204,7 @@ export default function VideoPage() {
             saveLog(buildLog({ prompt: snapshot.text, model, config: snapshot.config, references: snapshot.references, videoReferences: snapshot.videoReferences, audioReferences: snapshot.audioReferences, durationMs: performance.now() - batchStartedAt, status: "失败", error: errorMessage }));
             message.error(errorMessage);
         } finally {
+            if (abortControllerRef.current === abortController) abortControllerRef.current = null;
             setRunning(false);
         }
     };
