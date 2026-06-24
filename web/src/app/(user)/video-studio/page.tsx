@@ -1,16 +1,37 @@
 "use client";
 
-import { useMemo } from "react";
-import { Button, Empty, Tag } from "antd";
+import { useEffect, useMemo, useState } from "react";
+import { App, Button, Empty, Input, Tag } from "antd";
 import { ArrowLeft, Film, Layers3, Library, Plus, Sparkles } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { nanoid } from "nanoid";
 
-import { defaultVideoStudioProject } from "./types";
+import { defaultVideoStudioProject, type VideoStudioProject } from "./types";
+import { listVideoStudioProjects, saveVideoStudioProject } from "./storage";
 
 export default function VideoStudioPage() {
     const router = useRouter();
-    const project = useMemo(() => defaultVideoStudioProject(nanoid(), "视频编辑器迁移预览"), []);
+    const { message } = App.useApp();
+    const [project, setProject] = useState<VideoStudioProject>(() => defaultVideoStudioProject(nanoid(), "视频编辑器迁移预览"));
+    const [projects, setProjects] = useState<VideoStudioProject[]>([]);
+
+    const refreshProjects = async () => setProjects(await listVideoStudioProjects());
+
+    useEffect(() => {
+        void refreshProjects();
+    }, []);
+
+    const saveProject = async () => {
+        const saved = await saveVideoStudioProject(project);
+        setProject(saved);
+        await refreshProjects();
+        message.success("视频工程已保存到本地");
+    };
+
+    const createProject = () => {
+        setProject(defaultVideoStudioProject(nanoid(), "未命名视频工程"));
+        message.info("已新建空白视频工程");
+    };
 
     return (
         <main className="min-h-screen bg-slate-950 text-slate-100">
@@ -18,14 +39,16 @@ export default function VideoStudioPage() {
                 <div className="flex items-center gap-3">
                     <Button size="small" icon={<ArrowLeft className="size-4" />} onClick={() => router.push("/video")}>返回视频生成</Button>
                     <div>
-                        <div className="flex items-center gap-2 text-lg font-semibold"><Film className="size-5 text-purple-300" />{project.title}</div>
+                        <div className="flex items-center gap-2 text-lg font-semibold"><Film className="size-5 text-purple-300" /><Input variant="borderless" className="!px-0 !text-lg !font-semibold !text-slate-100" value={project.title} onChange={(event) => setProject((value) => ({ ...value, title: event.target.value, updatedAt: Date.now() }))} /></div>
                         <div className="mt-0.5 text-xs text-slate-400">MagicalCanvas 视频/音频编辑模块迁移壳 · 暂不替换现有 /video</div>
                     </div>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center justify-end gap-2">
                     <Tag color="purple">{project.aspectRatio}</Tag>
                     <Tag color="blue">{project.width}×{project.height}</Tag>
                     <Tag color="default">{Math.round(project.durationMs / 1000)}s</Tag>
+                    <Button size="small" onClick={createProject}>新建</Button>
+                    <Button size="small" type="primary" onClick={() => void saveProject()}>保存工程</Button>
                 </div>
             </header>
 
@@ -36,6 +59,17 @@ export default function VideoStudioPage() {
                         <Button size="small" icon={<Plus className="size-3.5" />} disabled>导入</Button>
                     </div>
                     <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={<span className="text-slate-400">后续接入当前资产库 / file-storage</span>} />
+                    <div className="mt-6">
+                        <div className="mb-2 text-sm font-medium text-slate-300">本地工程</div>
+                        <div className="space-y-2">
+                            {projects.length ? projects.map((item) => (
+                                <button key={item.id} type="button" className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-left text-sm hover:bg-white/[0.06]" onClick={() => setProject(item)}>
+                                    <div className="truncate text-slate-100">{item.title}</div>
+                                    <div className="mt-1 text-xs text-slate-500">{new Date(item.updatedAt).toLocaleString()}</div>
+                                </button>
+                            )) : <div className="rounded-lg border border-dashed border-white/10 p-3 text-xs text-slate-500">暂无本地视频工程，点击右上角保存当前工程。</div>}
+                        </div>
+                    </div>
                 </aside>
 
                 <div className="flex min-w-0 flex-col">
