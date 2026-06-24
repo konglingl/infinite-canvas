@@ -54,6 +54,33 @@ export default function VideoStudioPage() {
         setProject((value) => ({ ...value, tracks: value.tracks.map((track) => (track.id === trackId ? { ...track, clips: track.clips.filter((clip) => clip.id !== clipId) } : track)), updatedAt: Date.now() }));
     };
 
+    const clearTimeline = () => {
+        setProject((value) => ({ ...value, tracks: value.tracks.map((track) => ({ ...track, clips: [] })), durationMs: 30000, updatedAt: Date.now() }));
+        message.info("已清空时间线");
+    };
+
+    const addAllAssetsToTimeline = () => {
+        setProject((value) => {
+            const media = value.assets.filter((asset) => asset.kind === "image" || asset.kind === "video");
+            let imageStart = value.tracks.find((track) => track.kind === "image")?.clips.reduce((max, clip) => Math.max(max, clip.startMs + clip.durationMs), 0) || 0;
+            let videoStart = value.tracks.find((track) => track.kind === "video")?.clips.reduce((max, clip) => Math.max(max, clip.startMs + clip.durationMs), 0) || 0;
+            const tracks = value.tracks.map((track) => {
+                if (track.kind !== "image" && track.kind !== "video") return track;
+                const nextClips = [...track.clips];
+                media.filter((asset) => asset.kind === track.kind).forEach((asset) => {
+                    const startMs = track.kind === "video" ? videoStart : imageStart;
+                    const durationMs = asset.kind === "video" && asset.durationMs ? asset.durationMs : 3000;
+                    nextClips.push({ id: nanoid(), trackId: track.id, assetId: asset.id, kind: track.kind, title: asset.title, startMs, durationMs });
+                    if (track.kind === "video") videoStart += durationMs;
+                    else imageStart += durationMs;
+                });
+                return { ...track, clips: nextClips };
+            });
+            return { ...value, tracks, durationMs: Math.max(value.durationMs, imageStart, videoStart), updatedAt: Date.now() };
+        });
+        message.success("已将工程素材加入时间线");
+    };
+
     const addAssetToTimeline = (asset: VideoStudioAssetRef) => {
         const targetKind = asset.kind === "video" ? "video" : "image";
         setProject((value) => {
@@ -138,7 +165,15 @@ export default function VideoStudioPage() {
                             <div className="mb-3 flex items-center gap-2 font-medium"><Layers3 className="size-4" />工程结构</div>
                             <div className="mb-4 rounded-xl border border-white/10 bg-white/[0.03] p-3">
                                 <div className="mb-2 text-sm font-medium">工程素材</div>
-                                {project.assets.length ? <div className="flex flex-wrap gap-2">{project.assets.map((asset) => <button key={asset.id} type="button" className="rounded border border-white/10 bg-white/[0.04] px-2 py-1 text-xs hover:bg-white/[0.08]" onClick={() => addAssetToTimeline(asset)}><span className={asset.kind === "video" ? "text-sky-300" : "text-purple-300"}>{asset.kind === "video" ? "视频" : "图片"}</span><span className="ml-1 text-slate-100">{asset.title}</span><span className="ml-1 text-slate-500">+时间线</span></button>)}</div> : <div className="text-xs text-slate-500">尚未加入素材</div>}
+                                {project.assets.length ? (
+                                    <>
+                                        <div className="mb-2 flex flex-wrap gap-2">
+                                            <Button size="small" onClick={addAllAssetsToTimeline}>全部加入时间线</Button>
+                                            <Button size="small" danger onClick={clearTimeline}>清空时间线</Button>
+                                        </div>
+                                        <div className="flex flex-wrap gap-2">{project.assets.map((asset) => <button key={asset.id} type="button" className="rounded border border-white/10 bg-white/[0.04] px-2 py-1 text-xs hover:bg-white/[0.08]" onClick={() => addAssetToTimeline(asset)}><span className={asset.kind === "video" ? "text-sky-300" : "text-purple-300"}>{asset.kind === "video" ? "视频" : "图片"}</span><span className="ml-1 text-slate-100">{asset.title}</span><span className="ml-1 text-slate-500">+时间线</span></button>)}</div>
+                                    </>
+                                ) : <div className="text-xs text-slate-500">尚未加入素材</div>}
                             </div>
                             <div className="space-y-2">
                                 {project.tracks.map((track) => (
