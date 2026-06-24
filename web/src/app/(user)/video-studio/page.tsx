@@ -157,6 +157,10 @@ export default function VideoStudioPage() {
         setProject((value) => ({ ...value, aspectRatio, ...size, updatedAt: Date.now() }));
     };
 
+    const updateTrack = (trackId: string, patch: { muted?: boolean; locked?: boolean }) => {
+        setProject((value) => ({ ...value, tracks: value.tracks.map((track) => (track.id === trackId ? { ...track, ...patch } : track)), updatedAt: Date.now() }));
+    };
+
     const updateClip = (clipId: string, patch: Partial<VideoStudioClip>) => {
         setProject((value) => {
             const tracks = value.tracks.map((track) => ({ ...track, clips: track.clips.map((clip) => (clip.id === clipId ? { ...clip, ...patch } : clip)) }));
@@ -165,6 +169,11 @@ export default function VideoStudioPage() {
     };
 
     const removeClip = (trackId: string, clipId: string) => {
+        const track = project.tracks.find((item) => item.id === trackId);
+        if (track?.locked) {
+            message.warning("????????????");
+            return;
+        }
         if (selectedClipId === clipId) setSelectedClipId(null);
         setProject((value) => ({ ...value, tracks: value.tracks.map((track) => (track.id === trackId ? { ...track, clips: track.clips.filter((clip) => clip.id !== clipId) } : track)), updatedAt: Date.now() }));
     };
@@ -193,7 +202,7 @@ export default function VideoStudioPage() {
             let imageStart = source.tracks.find((track) => track.kind === "image")?.clips.reduce((max, clip) => Math.max(max, clip.startMs + clip.durationMs), 0) || 0;
             let videoStart = source.tracks.find((track) => track.kind === "video")?.clips.reduce((max, clip) => Math.max(max, clip.startMs + clip.durationMs), 0) || 0;
             const tracks = source.tracks.map((track) => {
-                if (track.kind !== "image" && track.kind !== "video") return track;
+                if (track.locked || (track.kind !== "image" && track.kind !== "video")) return track;
                 const nextClips = [...track.clips];
                 media.filter((asset) => asset.kind === track.kind).forEach((asset) => {
                     const startMs = track.kind === "video" ? videoStart : imageStart;
@@ -217,6 +226,7 @@ export default function VideoStudioPage() {
             const trackIndex = source.tracks.findIndex((track) => track.kind === targetKind);
             if (trackIndex < 0) return source;
             const track = source.tracks[trackIndex];
+            if (track.locked) return source;
             const startMs = track.clips.reduce((max, clip) => Math.max(max, clip.startMs + clip.durationMs), 0);
             const clip = { id: clipId, trackId: track.id, assetId: asset.id, kind: targetKind, title: asset.title, startMs, durationMs: asset.kind === "video" && asset.durationMs ? asset.durationMs : 3000 };
             const tracks = source.tracks.map((item, index) => (index === trackIndex ? { ...item, clips: [...item.clips, clip] } : item));
@@ -233,6 +243,7 @@ export default function VideoStudioPage() {
             const trackIndex = source.tracks.findIndex((track) => track.kind === "overlay");
             if (trackIndex < 0) return source;
             const track = source.tracks[trackIndex];
+            if (track.locked) return source;
             const startMs = track.clips.reduce((max, clip) => Math.max(max, clip.startMs + clip.durationMs), 0);
             const clip: VideoStudioClip = { id: clipId, trackId: track.id, assetId: asset.id, kind: "overlay", title: asset.title, startMs, durationMs: 3000, xPct: 64, yPct: 58, widthPct: 28, heightPct: 28, borderRadiusPct: 8, opacity: 100 };
             const tracks = source.tracks.map((item, index) => (index === trackIndex ? { ...item, clips: [...item.clips, clip] } : item));
@@ -370,9 +381,13 @@ export default function VideoStudioPage() {
                             <div className="space-y-2">
                                 {project.tracks.map((track) => (
                                     <div key={track.id} className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
-                                        <div className="flex items-center justify-between text-sm">
+                                        <div className="flex items-center justify-between gap-2 text-sm">
                                             <span>{track.name}</span>
-                                            <Tag className="m-0" color="geekblue">{track.kind}</Tag>
+                                            <div className="flex items-center gap-1">
+                                                <Button size="small" type={track.muted ? "primary" : "default"} onClick={() => updateTrack(track.id, { muted: !track.muted })}>{track.muted ? "???" : "??"}</Button>
+                                                <Button size="small" type={track.locked ? "primary" : "default"} onClick={() => updateTrack(track.id, { locked: !track.locked })}>{track.locked ? "???" : "??"}</Button>
+                                                <Tag className="m-0" color="geekblue">{track.kind}</Tag>
+                                            </div>
                                         </div>
                                         <div className="mt-2 text-xs text-slate-500">{track.clips.length ? `${track.clips.length} 个片段` : "暂无片段"}</div>
                                     </div>
@@ -389,8 +404,8 @@ export default function VideoStudioPage() {
                         <div className="space-y-2">
                             {project.tracks.map((track) => (
                                 <div key={track.id} className="grid grid-cols-[108px_minmax(0,1fr)] items-center gap-3">
-                                    <div className="truncate text-xs text-slate-400">{track.name}</div>
-                                    <div className="flex h-12 items-center gap-1 overflow-x-auto rounded-lg border border-dashed border-white/10 bg-white/[0.03] px-1">{track.clips.map((clip) => {
+                                    <div className="truncate text-xs text-slate-400">{track.name}{track.muted ? " ? ??" : ""}{track.locked ? " ? ??" : ""}</div>
+                                    <div className={`flex h-12 items-center gap-1 overflow-x-auto rounded-lg border border-dashed border-white/10 px-1 ${track.locked ? "border-amber-300/30 bg-amber-500/5" : "bg-white/[0.03]"}`}>{track.clips.map((clip) => {
                                         const selected = selectedClipId === clip.id;
                                         return <button key={clip.id} type="button" className={`flex h-8 min-w-20 items-center rounded px-2 text-left text-xs ring-1 transition ${TRACK_COLORS[clip.kind]} ${selected ? "ring-2 ring-white shadow-[0_0_0_1px_rgba(255,255,255,0.35)]" : "ring-white/10 hover:ring-white/40"}`} style={{ width: `${Math.max(80, clip.durationMs / 40)}px` }} title="单击选中，双击删除片段" onClick={() => setSelectedClipId(clip.id)} onDoubleClick={() => removeClip(track.id, clip.id)}><span className="truncate">{clip.title || clip.kind}</span></button>;
                                     })}</div>
