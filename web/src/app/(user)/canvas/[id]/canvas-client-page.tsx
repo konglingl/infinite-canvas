@@ -165,11 +165,14 @@ function buildStoryWorkflowDraft(options: StoryWorkflowOptions, center: Position
     const workflowRowGap = configSpec.height + 48;
     const startX = center.x - 760;
     const startY = center.y - 360;
-    const workflowMeta = (stage: string, index?: number, total?: number): Pick<CanvasNodeMetadata, "workflowTitle" | "workflowStage" | "workflowIndex" | "workflowTotal"> => ({
+    const workflowMeta = (stage: string, index?: number, total?: number): Pick<CanvasNodeMetadata, "workflowTitle" | "workflowStage" | "workflowIndex" | "workflowTotal"> & Partial<CanvasNodeMetadata> => ({
         workflowTitle: options.title,
         workflowStage: stage,
         workflowIndex: index,
         workflowTotal: total,
+        workflowKeyframeMode: options.keyframeMode,
+        workflowIncludeNarration: options.includeNarration,
+        workflowAnnotateSpeakers: options.annotateSpeakers,
     });
 
     const summaryNode = createWorkflowNode(CanvasNodeType.Text, "故事总纲", { x: startX, y: startY }, 460, 260, {
@@ -231,7 +234,7 @@ function buildStoryWorkflowDraft(options: StoryWorkflowOptions, center: Position
                 vquality: defaults.videoQuality,
                 generateAudio: defaults.videoGenerateAudio,
                 watermark: defaults.videoWatermark,
-                prompt: `基于分镜 ${index + 1} 生成短视频：镜头轻微运动，主体动作自然，保持角色和场景一致。画面描述：${shots[index] || shotNode.metadata?.content || ""}`,
+                prompt: buildVideoWorkflowPrompt(shots[index] || shotNode.metadata?.content || "", index, options),
                 content: `由分镜 ${index + 1} 继续生成视频`,
                 status: NODE_STATUS_IDLE,
                 ...workflowMeta("视频配置", index + 1, shots.length),
@@ -316,6 +319,12 @@ function normalizeStoryShots(shots: string[] | undefined, fallback: string[], co
     }
     while (normalized.length < safeCount) normalized.push(fallback[Math.min(normalized.length, fallback.length - 1)] || "补充分镜画面");
     return normalized.slice(0, safeCount);
+}
+
+function buildVideoWorkflowPrompt(shot: string, index: number, options: StoryWorkflowOptions) {
+    const narrationText = options.includeNarration ? "如需要旁白，请让画面节奏给旁白留出呼吸空间，并用镜头语言承接旁白信息。" : "";
+    const speakerText = options.annotateSpeakers ? "如有对白，请保持说话人位置、表情和动作连贯，避免角色错位。" : "";
+    return `基于分镜 ${index + 1} 生成短视频：镜头轻微运动，主体动作自然，保持角色和场景一致。${storyWorkflowKeyframeInstruction(options.keyframeMode)}${narrationText}${speakerText}画面描述：${shot}`;
 }
 
 function buildShotPrompt(shot: string, index: number, options: StoryWorkflowOptions, characters: string[], scenes: string[]) {
