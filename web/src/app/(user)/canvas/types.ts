@@ -122,6 +122,9 @@ export type CanvasStoryWorkflowTemplate = {
     shotCount: number;
     createVideoNodes: boolean;
     useAiSplit: boolean;
+    keyframeMode?: "smart" | "single" | "start-end";
+    includeNarration?: boolean;
+    annotateSpeakers?: boolean;
     createdAt: string;
     updatedAt: string;
 };

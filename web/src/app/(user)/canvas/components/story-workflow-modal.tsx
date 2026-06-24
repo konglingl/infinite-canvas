@@ -13,6 +13,9 @@ export type StoryWorkflowOptions = {
     shotCount: number;
     createVideoNodes: boolean;
     useAiSplit: boolean;
+    keyframeMode: "smart" | "single" | "start-end";
+    includeNarration: boolean;
+    annotateSpeakers: boolean;
 };
 
 type StoryWorkflowModalProps = {
@@ -35,6 +38,9 @@ type StoryWorkflowTemplate = {
     shotCount: number;
     createVideoNodes: boolean;
     useAiSplit: boolean;
+    keyframeMode?: "smart" | "single" | "start-end";
+    includeNarration?: boolean;
+    annotateSpeakers?: boolean;
     custom?: boolean;
 };
 
@@ -114,6 +120,9 @@ export function StoryWorkflowModal({ open, customTemplates = [], onCustomTemplat
     const [shotCount, setShotCount] = useState(6);
     const [createVideoNodes, setCreateVideoNodes] = useState(true);
     const [useAiSplit, setUseAiSplit] = useState(true);
+    const [keyframeMode, setKeyframeMode] = useState<StoryWorkflowOptions["keyframeMode"]>("smart");
+    const [includeNarration, setIncludeNarration] = useState(true);
+    const [annotateSpeakers, setAnnotateSpeakers] = useState(true);
     const [templateCategory, setTemplateCategory] = useState("all");
     const [templateKeyword, setTemplateKeyword] = useState("");
     const [templateName, setTemplateName] = useState("");
@@ -131,6 +140,9 @@ export function StoryWorkflowModal({ open, customTemplates = [], onCustomTemplat
                 shotCount: template.shotCount,
                 createVideoNodes: template.createVideoNodes,
                 useAiSplit: template.useAiSplit,
+        keyframeMode: template.keyframeMode || "smart",
+        includeNarration: template.includeNarration ?? true,
+        annotateSpeakers: template.annotateSpeakers ?? true,
                 custom: true,
             })),
         [customTemplates],
@@ -156,6 +168,9 @@ export function StoryWorkflowModal({ open, customTemplates = [], onCustomTemplat
         setShotCount(template.shotCount);
         setCreateVideoNodes(template.createVideoNodes);
         setUseAiSplit(template.useAiSplit);
+        setKeyframeMode(template.keyframeMode || "smart");
+        setIncludeNarration(template.includeNarration ?? true);
+        setAnnotateSpeakers(template.annotateSpeakers ?? true);
         if (template.custom) setTemplateName(template.title);
     };
 
@@ -174,6 +189,9 @@ export function StoryWorkflowModal({ open, customTemplates = [], onCustomTemplat
             shotCount,
             createVideoNodes,
             useAiSplit,
+            keyframeMode,
+            includeNarration,
+            annotateSpeakers,
             createdAt: existing?.createdAt || now,
             updatedAt: now,
         };
@@ -189,7 +207,7 @@ export function StoryWorkflowModal({ open, customTemplates = [], onCustomTemplat
     const submit = () => {
         const trimmed = story.trim();
         if (!trimmed) return;
-        onCreate({ title: title.trim() || "故事工作流", story: trimmed, style, shotCount, createVideoNodes, useAiSplit });
+        onCreate({ title: title.trim() || "故事工作流", story: trimmed, style, shotCount, createVideoNodes, useAiSplit, keyframeMode, includeNarration, annotateSpeakers });
         setStory("");
     };
 
