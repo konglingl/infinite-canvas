@@ -83,6 +83,7 @@ export default function VideoStudioPage() {
     const previewClipInfo = useMemo(() => findPreviewClip(project, selectedClipId), [project, selectedClipId]);
     const previewAsset = previewClipInfo?.clip.assetId ? project.assets.find((asset) => asset.id === previewClipInfo.clip.assetId) : undefined;
     const overlayClips = useMemo(() => project.tracks.find((track) => track.kind === "overlay")?.clips || [], [project.tracks]);
+    const subtitleClips = useMemo(() => project.tracks.find((track) => track.kind === "subtitle")?.clips || [], [project.tracks]);
 
     const refreshProjects = async () => setProjects((await listVideoStudioProjects()).map(normalizeVideoStudioProject));
 
@@ -188,7 +189,7 @@ export default function VideoStudioPage() {
     const removeClip = (trackId: string, clipId: string) => {
         const track = project.tracks.find((item) => item.id === trackId);
         if (track?.locked) {
-            message.warning("????????????");
+            message.warning("轨道已锁定，无法删除片段");
             return;
         }
         if (selectedClipId === clipId) setSelectedClipId(null);
@@ -253,6 +254,23 @@ export default function VideoStudioPage() {
         message.success("已加入时间线");
     };
 
+    const addSubtitleClip = () => {
+        const clipId = nanoid();
+        setProject((value) => {
+            const source = normalizeVideoStudioProject(value);
+            const trackIndex = source.tracks.findIndex((track) => track.kind === "subtitle");
+            if (trackIndex < 0) return source;
+            const track = source.tracks[trackIndex];
+            if (track.locked) return source;
+            const startMs = track.clips.reduce((max, clip) => Math.max(max, clip.startMs + clip.durationMs), 0);
+            const clip: VideoStudioClip = { id: clipId, trackId: track.id, kind: "subtitle", title: "字幕片段", text: "输入字幕文本", startMs, durationMs: 3000, xPct: 50, yPct: 84, widthPct: 78, borderRadiusPct: 10, opacity: 100 };
+            const tracks = source.tracks.map((item, index) => (index === trackIndex ? { ...item, clips: [...item.clips, clip] } : item));
+            return { ...source, tracks, durationMs: Math.max(source.durationMs, startMs + clip.durationMs), updatedAt: Date.now() };
+        });
+        setSelectedClipId(clipId);
+        message.success("已新增字幕片段");
+    };
+
     const addAssetToOverlayTrack = (asset: VideoStudioAssetRef) => {
         const clipId = nanoid();
         setProject((value) => {
@@ -267,7 +285,7 @@ export default function VideoStudioPage() {
             return { ...source, tracks, durationMs: Math.max(source.durationMs, startMs + clip.durationMs), updatedAt: Date.now() };
         });
         setSelectedClipId(clipId);
-        message.success("????????");
+        message.success("已加入画中画轨道");
     };
 
     const previewSize = previewBoxSize(project.aspectRatio);
@@ -354,10 +372,15 @@ export default function VideoStudioPage() {
                                     const asset = clip.assetId ? project.assets.find((item) => item.id === clip.assetId) : undefined;
                                     if (!asset?.url) return null;
                                     const style = { left: `${clip.xPct ?? 64}%`, top: `${clip.yPct ?? 58}%`, width: `${clip.widthPct ?? 28}%`, height: `${clip.heightPct ?? 28}%`, borderRadius: `${clip.borderRadiusPct ?? 8}%`, opacity: (clip.opacity ?? 100) / 100 };
-                                    return <button key={clip.id} type="button" className={`absolute overflow-hidden border border-white/40 bg-black/20 shadow-xl ${selectedClipId === clip.id ? "ring-2 ring-fuchsia-300" : ""}`} style={style} onClick={() => setSelectedClipId(clip.id)} title="???/????">
+                                    return <button key={clip.id} type="button" className={`absolute overflow-hidden border border-white/40 bg-black/20 shadow-xl ${selectedClipId === clip.id ? "ring-2 ring-fuchsia-300" : ""}`} style={style} onClick={() => setSelectedClipId(clip.id)} title="画中画/贴纸片段">
                                         {asset.kind === "video" ? <video src={asset.url} className="size-full object-cover" muted playsInline /> : <img src={asset.url} alt={asset.title} className="size-full object-cover" />}
                                     </button>;
                                 })}
+                                {subtitleClips.map((clip) => (
+                                    <button key={clip.id} type="button" className={`absolute -translate-x-1/2 rounded-lg bg-black/70 px-3 py-2 text-center text-sm font-medium leading-relaxed text-white shadow-lg backdrop-blur ${selectedClipId === clip.id ? "ring-2 ring-slate-100" : ""}`} style={{ left: `${clip.xPct ?? 50}%`, top: `${clip.yPct ?? 84}%`, width: `${clip.widthPct ?? 78}%`, borderRadius: `${clip.borderRadiusPct ?? 10}px`, opacity: (clip.opacity ?? 100) / 100 }} onClick={() => setSelectedClipId(clip.id)} title="字幕片段">
+                                        {clip.text || clip.title || "字幕"}
+                                    </button>
+                                ))}
                                 {previewClipInfo ? (
                                     <div className="absolute inset-x-3 bottom-3 rounded-lg bg-black/65 px-3 py-2 text-xs text-white backdrop-blur">
                                         <div className="truncate font-medium">{previewClipInfo.clip.title || previewClipInfo.clip.kind}</div>
@@ -374,9 +397,10 @@ export default function VideoStudioPage() {
                                     <>
                                         <div className="mb-2 flex flex-wrap gap-2">
                                             <Button size="small" onClick={addAllAssetsToTimeline}>全部加入时间线</Button>
+                                            <Button size="small" onClick={addSubtitleClip}>新增字幕</Button>
                                             <Button size="small" danger onClick={clearTimeline}>清空时间线</Button>
                                         </div>
-                                        <div className="flex flex-wrap gap-2">{project.assets.map((asset) => <span key={asset.id} className="inline-flex items-center rounded border border-white/10 bg-white/[0.04] text-xs"><button type="button" className="px-2 py-1 hover:bg-white/[0.08]" onClick={() => addAssetToTimeline(asset)}><span className={asset.kind === "video" ? "text-sky-300" : "text-purple-300"}>{asset.kind === "video" ? "视频" : "图片"}</span><span className="ml-1 text-slate-100">{asset.title}</span><span className="ml-1 text-slate-500">+时间线</span></button><button type="button" className="border-l border-white/10 px-1.5 py-1 text-slate-500 hover:text-red-300" title="移除素材" onClick={() => removeAssetFromProject(asset.id)}>×</button></span>)}</div>
+                                        <div className="flex flex-wrap gap-2">{project.assets.map((asset) => <span key={asset.id} className="inline-flex items-center rounded border border-white/10 bg-white/[0.04] text-xs"><button type="button" className="px-2 py-1 hover:bg-white/[0.08]" onClick={() => addAssetToTimeline(asset)}><span className={asset.kind === "video" ? "text-sky-300" : "text-purple-300"}>{asset.kind === "video" ? "视频" : "图片"}</span><span className="ml-1 text-slate-100">{asset.title}</span><span className="ml-1 text-slate-500">+时间线</span></button><button type="button" className="border-l border-white/10 px-2 py-1 text-fuchsia-300 hover:bg-white/[0.08]" title="加入画中画/贴纸轨道" onClick={() => addAssetToOverlayTrack(asset)}>PiP</button><button type="button" className="border-l border-white/10 px-1.5 py-1 text-slate-500 hover:text-red-300" title="移除素材" onClick={() => removeAssetFromProject(asset.id)}>×</button></span>)}</div>
                                     </>
                                 ) : <div className="text-xs text-slate-500">尚未加入素材</div>}
                             </div>
@@ -390,6 +414,17 @@ export default function VideoStudioPage() {
                                             <label className="space-y-1"><span className="text-slate-500">起始(s)</span><Input size="small" type="number" min={0} value={Math.round(selectedClipInfo.clip.startMs / 100) / 10} onChange={(event) => updateClip(selectedClipInfo.clip.id, { startMs: Math.max(0, Number(event.target.value || 0) * 1000) })} /></label>
                                             <label className="space-y-1"><span className="text-slate-500">时长(s)</span><Input size="small" type="number" min={0.1} value={Math.round(selectedClipInfo.clip.durationMs / 100) / 10} onChange={(event) => updateClip(selectedClipInfo.clip.id, { durationMs: Math.max(100, Number(event.target.value || 0.1) * 1000) })} /></label>
                                         </div>
+                                        {selectedClipInfo.clip.kind === "subtitle" ? (
+                                            <div className="rounded-lg border border-slate-300/20 bg-slate-500/5 p-2">
+                                                <div className="mb-2 text-slate-300">字幕文本</div>
+                                                <Input.TextArea size="small" autoSize={{ minRows: 2, maxRows: 4 }} value={selectedClipInfo.clip.text || ""} placeholder="输入字幕文本" onChange={(event) => updateClip(selectedClipInfo.clip.id, { text: event.target.value, title: event.target.value.slice(0, 24) || "字幕片段" })} />
+                                                <div className="mt-2 grid grid-cols-3 gap-2">
+                                                    <label className="space-y-1"><span className="text-slate-500">X%</span>{percentInput(selectedClipInfo.clip.xPct, 50, (value) => updateClip(selectedClipInfo.clip.id, { xPct: value }))}</label>
+                                                    <label className="space-y-1"><span className="text-slate-500">Y%</span>{percentInput(selectedClipInfo.clip.yPct, 84, (value) => updateClip(selectedClipInfo.clip.id, { yPct: value }))}</label>
+                                                    <label className="space-y-1"><span className="text-slate-500">?%</span>{percentInput(selectedClipInfo.clip.widthPct, 78, (value) => updateClip(selectedClipInfo.clip.id, { widthPct: Math.max(20, value) }))}</label>
+                                                </div>
+                                            </div>
+                                        ) : null}
                                         {selectedAsset ? <div className="truncate text-slate-500">素材：{selectedAsset.title}</div> : null}
                                         <div className="flex gap-2"><Button size="small" onClick={duplicateSelectedClip}>复制</Button><Button size="small" danger onClick={() => removeClip(selectedClipInfo.trackId, selectedClipInfo.clip.id)}>删除</Button></div>
                                     </div>
@@ -401,8 +436,8 @@ export default function VideoStudioPage() {
                                         <div className="flex items-center justify-between gap-2 text-sm">
                                             <span>{track.name}</span>
                                             <div className="flex items-center gap-1">
-                                                <Button size="small" type={track.muted ? "primary" : "default"} onClick={() => updateTrack(track.id, { muted: !track.muted })}>{track.muted ? "???" : "??"}</Button>
-                                                <Button size="small" type={track.locked ? "primary" : "default"} onClick={() => updateTrack(track.id, { locked: !track.locked })}>{track.locked ? "???" : "??"}</Button>
+                                                <Button size="small" type={track.muted ? "primary" : "default"} onClick={() => updateTrack(track.id, { muted: !track.muted })}>{track.muted ? "已静音" : "静音"}</Button>
+                                                <Button size="small" type={track.locked ? "primary" : "default"} onClick={() => updateTrack(track.id, { locked: !track.locked })}>{track.locked ? "已锁定" : "锁定"}</Button>
                                                 <Tag className="m-0" color="geekblue">{track.kind}</Tag>
                                             </div>
                                         </div>
@@ -421,7 +456,7 @@ export default function VideoStudioPage() {
                         <div className="space-y-2">
                             {project.tracks.map((track) => (
                                 <div key={track.id} className="grid grid-cols-[108px_minmax(0,1fr)] items-center gap-3">
-                                    <div className="truncate text-xs text-slate-400">{track.name}{track.muted ? " ? ??" : ""}{track.locked ? " ? ??" : ""}</div>
+                                    <div className="truncate text-xs text-slate-400">{track.name}{track.muted ? " ? 静音" : ""}{track.locked ? " ? 锁定" : ""}</div>
                                     <div className={`flex h-12 items-center gap-1 overflow-x-auto rounded-lg border border-dashed border-white/10 px-1 ${track.locked ? "border-amber-300/30 bg-amber-500/5" : "bg-white/[0.03]"}`}>{track.clips.map((clip) => {
                                         const selected = selectedClipId === clip.id;
                                         return <button key={clip.id} type="button" className={`flex h-8 min-w-20 items-center rounded px-2 text-left text-xs ring-1 transition ${TRACK_COLORS[clip.kind]} ${selected ? "ring-2 ring-white shadow-[0_0_0_1px_rgba(255,255,255,0.35)]" : "ring-white/10 hover:ring-white/40"}`} style={{ width: `${Math.max(80, clip.durationMs / 40)}px` }} title="单击选中，双击删除片段" onClick={() => setSelectedClipId(clip.id)} onDoubleClick={() => removeClip(track.id, clip.id)}><span className="truncate">{clip.title || clip.kind}</span></button>;
