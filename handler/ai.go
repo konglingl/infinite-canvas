@@ -492,7 +492,7 @@ func validateAIImageProxyPayload(body []byte) string {
 		return safeUpstreamText(payload.Error.Message)
 	}
 	for _, item := range payload.Data {
-		if hasNonEmptyImageField(item, "b64_json") || hasNonEmptyImageField(item, "url") {
+		if hasNonEmptyImageField(item, "b64_json") || hasNonEmptyImageField(item, "partial_image_b64") || hasNonEmptyImageField(item, "url") {
 			return ""
 		}
 	}
