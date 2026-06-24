@@ -321,7 +321,26 @@ function normalizeStoryShots(shots: string[] | undefined, fallback: string[], co
 function buildShotPrompt(shot: string, index: number, options: StoryWorkflowOptions, characters: string[], scenes: string[]) {
     const characterText = characters.length ? `角色参考：${characters.join("、")}。` : "";
     const sceneText = scenes.length ? `场景参考：${scenes.join("、")}。` : "";
-    return `第 ${index + 1} 个分镜。${shot}\n${characterText}${sceneText}\n统一风格：${options.style}。要求：电影分镜构图，主体清晰，动作明确，角色形象一致，画面可直接用于后续图生视频。`;
+    const narrationText = options.includeNarration ? "如包含解说旁白，请转化为可视化动作、表情、环境线索，不要在画面中出现大段文字。" : "";
+    const speakerText = options.annotateSpeakers ? "如包含对白，请明确说话角色、表情、动作、视线或站位，避免角色混淆。" : "";
+    return `第 ${index + 1} 个分镜。${shot}\n${characterText}${sceneText}\n${storyWorkflowKeyframeInstruction(options.keyframeMode)}${narrationText}${speakerText}\n统一风格：${options.style}。要求：中文提示词，电影分镜构图，主体清晰，动作明确，角色形象一致，画面可直接用于后续图生视频。`;
+}
+
+function storyWorkflowKeyframeInstruction(mode: StoryWorkflowOptions["keyframeMode"]) {
+    if (mode === "single") return "关键帧策略：每个镜头只生成一个最具代表性的单帧画面。";
+    if (mode === "start-end") return "关键帧策略：镜头描述需体现起始状态和结束状态，便于后续扩展为首尾帧。";
+    return "关键帧策略：智能判断镜头复杂度，简单动作使用单帧，复杂转场或连续动作描述清楚首尾变化。";
+}
+
+function storyWorkflowPlanningInstruction(options: StoryWorkflowOptions) {
+    const lines = [
+        "输出必须使用中文。",
+        "分镜内容密度要和镜头数量匹配：不要把每句台词都拆成过短镜头，连续动作和连续对白可合并成一个饱满镜头。",
+        storyWorkflowKeyframeInstruction(options.keyframeMode),
+    ];
+    if (options.includeNarration) lines.push("额外规划解说旁白要点，可融入 shots 字段中，但不要牺牲画面动作密度。");
+    if (options.annotateSpeakers) lines.push("对白必须标注说话人，并给出表情、动作、视线或站位，避免只写台词。");
+    return lines.map((line, index) => `${index + 1}. ${line}`).join("\n");
 }
 
 async function requestStoryWorkflowPlan(config: AiConfig, options: StoryWorkflowOptions): Promise<StoryWorkflowPlan> {
@@ -334,7 +353,7 @@ async function requestStoryWorkflowPlan(config: AiConfig, options: StoryWorkflow
             },
             {
                 role: "user",
-                content: `请把下面故事拆成适合 AI 画布的创作工作流。\n\n输出 JSON 格式：{"characters":[{"name":"","description":""}],"scenes":[{"name":"","description":""}],"shots":[""]}\n\n要求：\n1. characters 2-4 个，description 写清外观、服饰、气质和一致性特征。\n2. scenes 2-4 个，description 写清空间、光线、氛围和色彩。\n3. shots 必须刚好 ${options.shotCount} 条，每条是可直接生图的电影分镜描述。\n4. 风格统一：${options.style}\n\n标题：${options.title}\n\n故事：\n${options.story}`,
+                content: `请把下面故事拆成适合 AI 画布的创作工作流。\n\n输出 JSON 格式：{"characters":[{"name":"","description":""}],"scenes":[{"name":"","description":""}],"shots":[""]}\n\n要求：\n1. characters 2-4 个，description 写清外观、服饰、气质和一致性特征。\n2. scenes 2-4 个，description 写清空间、光线、氛围和色彩。\n3. shots 必须刚好 ${options.shotCount} 条，每条是可直接生图的中文电影分镜描述。\n4. 风格统一：${options.style}\n${storyWorkflowPlanningInstruction(options)}\n\n标题：${options.title}\n\n故事：\n${options.story}`,
             },
         ],
         () => undefined,
