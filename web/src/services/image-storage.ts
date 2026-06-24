@@ -154,6 +154,11 @@ export async function setImageBlob(storageKey: string, blob: Blob) {
 }
 
 export async function imageToDataUrl(image: { url?: string; dataUrl?: string; storageKey?: string }) {
+    if (image.dataUrl?.startsWith("data:")) return image.dataUrl;
+    return blobToDataUrl(await imageToBlob(image));
+}
+
+export async function imageToBlob(image: { url?: string; dataUrl?: string; storageKey?: string }) {
     const serverObjectId = image.storageKey?.startsWith("server:") ? image.storageKey.slice("server:".length) : "";
     const urls = [
         image.dataUrl && !image.dataUrl.startsWith("blob:") ? image.dataUrl : "",
@@ -161,10 +166,10 @@ export async function imageToDataUrl(image: { url?: string; dataUrl?: string; st
         serverObjectId ? `/api/files/${encodeURIComponent(serverObjectId)}/content` : "",
         !serverObjectId ? await resolveImageUrl(image.storageKey, image.url || image.dataUrl || "") : "",
     ].filter((url, index, list): url is string => Boolean(url) && list.indexOf(url) === index);
-    if (!urls.length) return "";
+    if (!urls.length) throw new Error("读取参考图失败");
     let lastError = "";
     for (const url of urls) {
-        if (url.startsWith("data:")) return url;
+        if (url.startsWith("data:")) return await fetch(url).then((response) => response.blob());
         try {
             const proxyUrl = getProxyUrl(url);
             const response = await fetch(proxyUrl);
@@ -172,7 +177,13 @@ export async function imageToDataUrl(image: { url?: string; dataUrl?: string; st
                 lastError = `读取参考图失败：${response.status}`;
                 continue;
             }
-            return blobToDataUrl(await response.blob());
+            const contentType = response.headers.get("content-type") || "";
+            if (contentType.includes("application/json")) {
+                const payload = (await response.json().catch(() => null)) as { msg?: string; error?: { message?: string } } | null;
+                lastError = payload?.msg || payload?.error?.message || "读取参考图失败";
+                continue;
+            }
+            return await response.blob();
         } catch (error) {
             lastError = error instanceof Error ? error.message : "读取参考图失败";
         }
