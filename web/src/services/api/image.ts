@@ -379,7 +379,7 @@ export async function requestImageQuestion(config: AiConfig, messages: ChatCompl
             }
             if (apiError) throw new Error(apiError);
         }
-        if (buffer) {
+        if (buffer.trim()) {
             parseStreamChunk(buffer, (delta) => {
                 answer += delta;
                 onDelta(answer);
