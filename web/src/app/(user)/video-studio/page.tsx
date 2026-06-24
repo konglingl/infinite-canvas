@@ -87,6 +87,12 @@ export default function VideoStudioPage() {
     const previewAsset = previewClipInfo?.clip.assetId ? project.assets.find((asset) => asset.id === previewClipInfo.clip.assetId) : undefined;
     const overlayClips = useMemo(() => project.tracks.find((track) => track.kind === "overlay")?.clips || [], [project.tracks]);
     const subtitleClips = useMemo(() => project.tracks.find((track) => track.kind === "subtitle")?.clips || [], [project.tracks]);
+    const projectStats = useMemo(() => {
+        const clips = project.tracks.reduce((sum, track) => sum + track.clips.length, 0);
+        const lockedTracks = project.tracks.filter((track) => track.locked).length;
+        const mutedTracks = project.tracks.filter((track) => track.muted).length;
+        return { clips, lockedTracks, mutedTracks };
+    }, [project.tracks]);
 
     const refreshProjects = async () => setProjects((await listVideoStudioProjects()).map(normalizeVideoStudioProject));
 
@@ -483,6 +489,17 @@ export default function VideoStudioPage() {
                                         <div className="flex gap-2"><Button size="small" onClick={duplicateSelectedClip}>复制</Button><Button size="small" danger onClick={() => removeClip(selectedClipInfo.trackId, selectedClipInfo.clip.id)}>删除</Button></div>
                                     </div>
                                 ) : <div className="text-xs text-slate-500">点击时间线片段后，可以预览、修改起始时间/时长或复制片段。</div>}
+                            </div>
+                            <div className="mb-4 rounded-xl border border-white/10 bg-white/[0.03] p-3 text-xs text-slate-400">
+                                <div className="mb-2 text-sm font-medium text-slate-200">工程统计</div>
+                                <div className="grid grid-cols-2 gap-2">
+                                    <div>???{project.assets.length}</div>
+                                    <div>???{projectStats.clips}</div>
+                                    <div>???{project.tracks.length}</div>
+                                    <div>???{formatMs(project.durationMs)}</div>
+                                    <div>静音轨道?{projectStats.mutedTracks}</div>
+                                    <div>锁定轨道?{projectStats.lockedTracks}</div>
+                                </div>
                             </div>
                             <div className="space-y-2">
                                 {project.tracks.map((track) => (
