@@ -223,6 +223,33 @@ export default function VideoStudioPage() {
         message.info("已清空时间线");
     };
 
+    const sortTimelineClips = () => {
+        setProject((value) => {
+            const tracks = value.tracks.map((track) => ({ ...track, clips: [...track.clips].sort((a, b) => a.startMs - b.startMs || a.id.localeCompare(b.id)) }));
+            return { ...value, tracks, durationMs: calculateDuration({ ...value, tracks }), updatedAt: Date.now() };
+        });
+        message.success("已按起始时间整理时间线");
+    };
+
+    const compactTimelineClips = () => {
+        setProject((value) => {
+            const tracks = value.tracks.map((track) => {
+                if (track.locked) return track;
+                let cursor = 0;
+                const clips = [...track.clips]
+                    .sort((a, b) => a.startMs - b.startMs || a.id.localeCompare(b.id))
+                    .map((clip) => {
+                        const next = { ...clip, startMs: cursor };
+                        cursor += clip.durationMs;
+                        return next;
+                    });
+                return { ...track, clips };
+            });
+            return { ...value, tracks, durationMs: calculateDuration({ ...value, tracks }), updatedAt: Date.now() };
+        });
+        message.success("已压紧未锁定轨道片段");
+    };
+
     const addAllAssetsToTimeline = () => {
         setProject((value) => {
             const source = normalizeVideoStudioProject(value);
