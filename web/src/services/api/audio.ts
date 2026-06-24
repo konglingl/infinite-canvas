@@ -25,7 +25,7 @@ function refreshRemoteUser(config: AiConfig) {
     if (config.channelMode === "remote") void useUserStore.getState().hydrateUser();
 }
 
-export async function requestAudioGeneration(config: AiConfig, prompt: string): Promise<Blob> {
+export async function requestAudioGeneration(config: AiConfig, prompt: string, options?: RequestOptions): Promise<Blob> {
     const model = (config.model || config.audioModel).trim();
     assertAudioConfig(config, model);
     const format = normalizeAudioFormatValue(config.audioFormat);

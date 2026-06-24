@@ -20,6 +20,8 @@ type ImageApiResponse = {
     msg?: string;
 };
 
+type RequestOptions = { signal?: AbortSignal };
+
 type ImageTaskPayload = {
     id?: string;
     taskId?: string;
@@ -209,15 +211,15 @@ function imageTaskResult(task: ImageTaskPayload): ImageApiResponse | undefined {
     return task.result || task.response;
 }
 
-async function submitImageTask(config: AiConfig, path: string, body: unknown, contentType?: string) {
-    const response = await axios.post<WrappedImageTaskResponse>(aiApiUrl(config, path), body, { headers: aiHeaders(config, contentType) });
+async function submitImageTask(config: AiConfig, path: string, body: unknown, contentType?: string, options?: RequestOptions) {
+    const response = await axios.post<WrappedImageTaskResponse>(aiApiUrl(config, path), body, { headers: aiHeaders(config, contentType), signal: options?.signal });
     if (response.data.code !== undefined && response.data.code !== 0) throw new Error(response.data.msg || "\u63d0\u4ea4\u4efb\u52a1\u5931\u8d25");
     const taskId = imageTaskId(response.data);
     if (!taskId) throw new Error("\u63d0\u4ea4\u4efb\u52a1\u5931\u8d25\uff1a\u672a\u8fd4\u56de\u4efb\u52a1 ID");
     return taskId;
 }
 
-async function pollImageTask(config: AiConfig, taskId: string) {
+async function pollImageTask(config: AiConfig, taskId: string, options?: RequestOptions) {
     const startedAt = Date.now();
     const timeoutMs = 2 * 60 * 60 * 1000;
     const intervalMs = 2000;
@@ -242,7 +244,7 @@ async function pollImageTask(config: AiConfig, taskId: string) {
     throw new Error("\u56fe\u7247\u4efb\u52a1\u7b49\u5f85\u8d85\u65f6");
 }
 
-async function requestImageTask(config: AiConfig, path: string, body: unknown, contentType?: string) {
+async function requestImageTask(config: AiConfig, path: string, body: unknown, contentType?: string, options?: RequestOptions) {
     const taskId = await submitImageTask(config, path, body, contentType);
     const images = await pollImageTask(config, taskId);
     refreshRemoteUser(config);
@@ -262,7 +264,7 @@ function withSystemMessage(config: AiConfig, messages: ChatCompletionMessage[]) 
     return systemPrompt ? [{ role: "system" as const, content: systemPrompt }, ...messages] : messages;
 }
 
-export async function requestGeneration(config: AiConfig, prompt: string) {
+export async function requestGeneration(config: AiConfig, prompt: string, options?: RequestOptions) {
     const n = Math.max(1, Math.min(15, Math.floor(Math.abs(Number(config.count)) || 1)));
     const quality = normalizeQuality(config.quality);
     const requestSize = resolveRequestSize(quality, config.size);
@@ -292,7 +294,7 @@ export async function requestGeneration(config: AiConfig, prompt: string) {
     }
 }
 
-export async function requestEdit(config: AiConfig, prompt: string, references: ReferenceImage[], mask?: ReferenceImage) {
+export async function requestEdit(config: AiConfig, prompt: string, references: ReferenceImage[], mask?: ReferenceImage, options?: RequestOptions) {
     const n = Math.max(1, Math.min(15, Math.floor(Math.abs(Number(config.count)) || 1)));
     const quality = normalizeQuality(config.quality);
     const requestSize = resolveRequestSize(quality, config.size);
@@ -318,7 +320,7 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
     } catch (error) {
         if (!shouldFallbackToSyncImageRequest(error)) throw new Error(readAxiosError(error, "\u8bf7\u6c42\u5931\u8d25"));
         try {
-            const response = await axios.post<ImageApiResponse>(aiApiUrl(config, "/images/edits"), formData, { headers: aiHeaders(config) });
+            const response = await axios.post<ImageApiResponse>(aiApiUrl(config, "/images/edits"), formData, { headers: aiHeaders(config), signal: options?.signal });
             const images = parseImagePayload(response.data);
             refreshRemoteUser(config);
             return images;
