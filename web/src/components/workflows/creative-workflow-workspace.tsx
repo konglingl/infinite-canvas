@@ -656,7 +656,7 @@ export function CreativeWorkflowWorkspace({
             message.warning("没有可生成的提示词");
             return;
         }
-        const concurrency = Math.max(1, Math.min(6, Number(runningWorkflow.seriesConfig.concurrency) || 3));
+        const concurrency = Math.max(1, Math.min(20, Number(runningWorkflow.seriesConfig.concurrency) || 3));
         for (let index = 0; index < drafts.length; index += concurrency) {
             const batch = drafts.slice(index, index + concurrency);
             await Promise.all(batch.map((draft) => runSeriesDraft(draft, Math.max(0, seriesDrafts.findIndex((item) => item.id === draft.id)))));
@@ -1500,7 +1500,7 @@ function WorkflowEditorModal({
                                 </Space.Compact>
                                 <Space.Compact className="w-full">
                                     <span className="inline-flex h-8 shrink-0 items-center rounded-l-md border border-r-0 border-stone-300 bg-stone-50 px-2 text-xs text-stone-500 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-400">并发</span>
-                                    <Input value={workflow.seriesConfig.concurrency} onChange={(event) => patchSeriesConfig({ concurrency: event.target.value })} />
+                                    <Input value={workflow.seriesConfig.concurrency} onChange={(event) => patchSeriesConfig({ concurrency: event.target.value })} placeholder="1-20" />
                                 </Space.Compact>
                             </div>
                             <Input.TextArea autoSize={{ minRows: 3, maxRows: 6 }} value={workflow.seriesConfig.promptInstruction} placeholder="系列拆分说明，例如：按封面、痛点、功能、场景、对比、总结拆成 6 张图。" onChange={(event) => patchSeriesConfig({ promptInstruction: event.target.value })} />
