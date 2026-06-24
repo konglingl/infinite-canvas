@@ -1197,8 +1197,8 @@ export function CreativeWorkflowWorkspace({
                                             <Button size="small" loading={seriesDraftLoading} onClick={() => void generateSeriesPromptDrafts()}>
                                                 重新生成
                                             </Button>
-                                            <Button size="small" type="primary" disabled={!activeSeriesDrafts.length} onClick={() => void runAllSeriesDrafts()}>
-                                                全部生成
+                                            <Button size="small" type={seriesBatchRunning ? "default" : "primary"} danger={seriesBatchRunning} disabled={!activeSeriesDrafts.length && !seriesBatchRunning} onClick={() => (seriesBatchRunning ? stopSeriesBatch() : void runAllSeriesDrafts())}>
+                                                {seriesBatchRunning ? "停止队列" : "全部生成"}
                                             </Button>
                                         </div>
                                     </div>
@@ -1886,8 +1886,8 @@ function normalizeSeriesDraft(draft: SeriesPromptDraft): SeriesPromptDraft {
         id: draft.id || nanoid(),
         title: draft.title || "未命名",
         prompt: draft.prompt || "",
-        status: draft.status === "running" ? "draft" : draft.status || "draft",
-        error: draft.error,
+        status: draft.status === "running" ? "failed" : draft.status || "draft",
+        error: draft.status === "running" ? "上次生成已中断，可重新生成" : draft.error,
         resultIds: Array.isArray(draft.resultIds) ? draft.resultIds : [],
     };
 }
