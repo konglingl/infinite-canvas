@@ -8,7 +8,7 @@ import { nanoid } from "nanoid";
 import { saveAs } from "file-saver";
 
 import { defaultVideoStudioProject, type VideoStudioAssetRef, type VideoStudioProject } from "./types";
-import { listVideoStudioProjects, saveVideoStudioProject } from "./storage";
+import { deleteVideoStudioProject, listVideoStudioProjects, saveVideoStudioProject } from "./storage";
 import { useAssetStore, type Asset } from "@/stores/use-asset-store";
 
 export default function VideoStudioPage() {
@@ -46,6 +46,22 @@ export default function VideoStudioPage() {
         setProject(next);
         await refreshProjects();
         message.success("视频工程已导入");
+    };
+
+    const deleteProject = async (projectId: string) => {
+        await deleteVideoStudioProject(projectId);
+        if (project.id === projectId) setProject(defaultVideoStudioProject(nanoid(), "未命名视频工程"));
+        await refreshProjects();
+        message.success("本地视频工程已删除");
+    };
+
+    const removeAssetFromProject = (assetId: string) => {
+        setProject((value) => ({
+            ...value,
+            assets: value.assets.filter((asset) => asset.id !== assetId),
+            tracks: value.tracks.map((track) => ({ ...track, clips: track.clips.filter((clip) => clip.assetId !== assetId) })),
+            updatedAt: Date.now(),
+        }));
     };
 
     const createProject = () => {
@@ -161,10 +177,13 @@ export default function VideoStudioPage() {
                         <div className="mb-2 text-sm font-medium text-slate-300">本地工程</div>
                         <div className="space-y-2">
                             {projects.length ? projects.map((item) => (
-                                <button key={item.id} type="button" className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-left text-sm hover:bg-white/[0.06]" onClick={() => setProject(item)}>
-                                    <div className="truncate text-slate-100">{item.title}</div>
-                                    <div className="mt-1 text-xs text-slate-500">{new Date(item.updatedAt).toLocaleString()}</div>
-                                </button>
+                                <div key={item.id} className="rounded-lg border border-white/10 bg-white/[0.03] p-2 text-sm">
+                                    <button type="button" className="w-full text-left hover:bg-white/[0.04]" onClick={() => setProject(item)}>
+                                        <div className="truncate text-slate-100">{item.title}</div>
+                                        <div className="mt-1 text-xs text-slate-500">{new Date(item.updatedAt).toLocaleString()}</div>
+                                    </button>
+                                    <Button className="mt-2" size="small" danger onClick={() => void deleteProject(item.id)}>删除</Button>
+                                </div>
                             )) : <div className="rounded-lg border border-dashed border-white/10 p-3 text-xs text-slate-500">暂无本地视频工程，点击右上角保存当前工程。</div>}
                         </div>
                     </div>
@@ -191,7 +210,7 @@ export default function VideoStudioPage() {
                                             <Button size="small" onClick={addAllAssetsToTimeline}>全部加入时间线</Button>
                                             <Button size="small" danger onClick={clearTimeline}>清空时间线</Button>
                                         </div>
-                                        <div className="flex flex-wrap gap-2">{project.assets.map((asset) => <button key={asset.id} type="button" className="rounded border border-white/10 bg-white/[0.04] px-2 py-1 text-xs hover:bg-white/[0.08]" onClick={() => addAssetToTimeline(asset)}><span className={asset.kind === "video" ? "text-sky-300" : "text-purple-300"}>{asset.kind === "video" ? "视频" : "图片"}</span><span className="ml-1 text-slate-100">{asset.title}</span><span className="ml-1 text-slate-500">+时间线</span></button>)}</div>
+                                        <div className="flex flex-wrap gap-2">{project.assets.map((asset) => <span key={asset.id} className="inline-flex items-center rounded border border-white/10 bg-white/[0.04] text-xs"><button type="button" className="px-2 py-1 hover:bg-white/[0.08]" onClick={() => addAssetToTimeline(asset)}><span className={asset.kind === "video" ? "text-sky-300" : "text-purple-300"}>{asset.kind === "video" ? "视频" : "图片"}</span><span className="ml-1 text-slate-100">{asset.title}</span><span className="ml-1 text-slate-500">+时间线</span></button><button type="button" className="border-l border-white/10 px-1.5 py-1 text-slate-500 hover:text-red-300" title="移除素材" onClick={() => removeAssetFromProject(asset.id)}>×</button></span>)}</div>
                                     </>
                                 ) : <div className="text-xs text-slate-500">尚未加入素材</div>}
                             </div>
