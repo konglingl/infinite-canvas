@@ -7,9 +7,58 @@ import { useRouter } from "next/navigation";
 import { nanoid } from "nanoid";
 import { saveAs } from "file-saver";
 
-import { defaultVideoStudioProject, normalizeVideoStudioProject, type VideoStudioAssetRef, type VideoStudioProject } from "./types";
+import { defaultVideoStudioProject, normalizeVideoStudioProject, type VideoStudioAssetRef, type VideoStudioClip, type VideoStudioProject, type VideoStudioTrackKind } from "./types";
 import { deleteVideoStudioProject, listVideoStudioProjects, saveVideoStudioProject } from "./storage";
 import { useAssetStore, type Asset } from "@/stores/use-asset-store";
+
+type ClipInfo = {
+    clip: VideoStudioClip;
+    trackId: string;
+    trackName: string;
+};
+
+const TRACK_COLORS: Record<VideoStudioTrackKind, string> = {
+    video: "bg-sky-500/35 text-sky-50 ring-sky-300/30",
+    image: "bg-purple-500/35 text-purple-50 ring-purple-300/30",
+    overlay: "bg-fuchsia-500/35 text-fuchsia-50 ring-fuchsia-300/30",
+    voice: "bg-amber-500/35 text-amber-50 ring-amber-300/30",
+    audio: "bg-emerald-500/35 text-emerald-50 ring-emerald-300/30",
+    subtitle: "bg-slate-500/45 text-slate-50 ring-slate-300/30",
+};
+
+function findClip(project: VideoStudioProject, clipId?: string | null): ClipInfo | null {
+    if (!clipId) return null;
+    for (const track of project.tracks) {
+        const clip = track.clips.find((item) => item.id === clipId);
+        if (clip) return { clip, trackId: track.id, trackName: track.name };
+    }
+    return null;
+}
+
+function findPreviewClip(project: VideoStudioProject, selectedClipId?: string | null): ClipInfo | null {
+    const selected = findClip(project, selectedClipId);
+    if (selected) return selected;
+    const preferredKinds: VideoStudioTrackKind[] = ["video", "image", "overlay", "subtitle"];
+    for (const kind of preferredKinds) {
+        const track = project.tracks.find((item) => item.kind === kind && item.clips.length > 0);
+        if (track?.clips[0]) return { clip: track.clips[0], trackId: track.id, trackName: track.name };
+    }
+    return null;
+}
+
+function calculateDuration(project: VideoStudioProject) {
+    return Math.max(30000, ...project.tracks.flatMap((track) => track.clips.map((clip) => clip.startMs + clip.durationMs)));
+}
+
+function formatMs(ms: number) {
+    return `${Math.round(ms / 100) / 10}s`;
+}
+
+function previewBoxSize(aspectRatio: VideoStudioProject["aspectRatio"]) {
+    if (aspectRatio === "9:16") return { width: 236, height: 420 };
+    if (aspectRatio === "1:1") return { width: 360, height: 360 };
+    return { width: 520, height: 292 };
+}
 
 export default function VideoStudioPage() {
     const router = useRouter();
@@ -17,14 +66,23 @@ export default function VideoStudioPage() {
     const importProjectRef = useRef<HTMLInputElement>(null);
     const [project, setProject] = useState<VideoStudioProject>(() => defaultVideoStudioProject(nanoid(), "视频编辑器迁移预览"));
     const [projects, setProjects] = useState<VideoStudioProject[]>([]);
+    const [selectedClipId, setSelectedClipId] = useState<string | null>(null);
     const assets = useAssetStore((state) => state.assets);
     const mediaAssets = assets.filter((asset) => asset.kind === "image" || asset.kind === "video");
+    const selectedClipInfo = useMemo(() => findClip(project, selectedClipId), [project, selectedClipId]);
+    const selectedAsset = selectedClipInfo?.clip.assetId ? project.assets.find((asset) => asset.id === selectedClipInfo.clip.assetId) : undefined;
+    const previewClipInfo = useMemo(() => findPreviewClip(project, selectedClipId), [project, selectedClipId]);
+    const previewAsset = previewClipInfo?.clip.assetId ? project.assets.find((asset) => asset.id === previewClipInfo.clip.assetId) : undefined;
 
     const refreshProjects = async () => setProjects((await listVideoStudioProjects()).map(normalizeVideoStudioProject));
 
     useEffect(() => {
         void refreshProjects();
     }, []);
+
+    useEffect(() => {
+        if (selectedClipId && !selectedClipInfo) setSelectedClipId(null);
+    }, [selectedClipId, selectedClipInfo]);
 
     const saveProject = async () => {
         const saved = await saveVideoStudioProject(normalizeVideoStudioProject(project));
@@ -44,18 +102,23 @@ export default function VideoStudioPage() {
         if (payload.type !== "infinite-canvas-video-studio-project" || !payload.project?.id) throw new Error("不是有效的视频工程文件");
         const next = await saveVideoStudioProject(normalizeVideoStudioProject({ ...payload.project, id: payload.project.id || nanoid(), updatedAt: Date.now() }));
         setProject(next);
+        setSelectedClipId(null);
         await refreshProjects();
         message.success("视频工程已导入");
     };
 
     const deleteProject = async (projectId: string) => {
         await deleteVideoStudioProject(projectId);
-        if (project.id === projectId) setProject(defaultVideoStudioProject(nanoid(), "未命名视频工程"));
+        if (project.id === projectId) {
+            setProject(defaultVideoStudioProject(nanoid(), "未命名视频工程"));
+            setSelectedClipId(null);
+        }
         await refreshProjects();
         message.success("本地视频工程已删除");
     };
 
     const removeAssetFromProject = (assetId: string) => {
+        if (selectedAsset?.id === assetId) setSelectedClipId(null);
         setProject((value) => ({
             ...value,
             assets: value.assets.filter((asset) => asset.id !== assetId),
@@ -66,6 +129,7 @@ export default function VideoStudioPage() {
 
     const createProject = () => {
         setProject(defaultVideoStudioProject(nanoid(), "未命名视频工程"));
+        setSelectedClipId(null);
         message.info("已新建空白视频工程");
     };
 
@@ -83,21 +147,42 @@ export default function VideoStudioPage() {
         setProject((value) => ({ ...value, aspectRatio, ...size, updatedAt: Date.now() }));
     };
 
+    const updateClip = (clipId: string, patch: Partial<VideoStudioClip>) => {
+        setProject((value) => {
+            const tracks = value.tracks.map((track) => ({ ...track, clips: track.clips.map((clip) => (clip.id === clipId ? { ...clip, ...patch } : clip)) }));
+            return { ...value, tracks, durationMs: calculateDuration({ ...value, tracks }), updatedAt: Date.now() };
+        });
+    };
+
     const removeClip = (trackId: string, clipId: string) => {
+        if (selectedClipId === clipId) setSelectedClipId(null);
         setProject((value) => ({ ...value, tracks: value.tracks.map((track) => (track.id === trackId ? { ...track, clips: track.clips.filter((clip) => clip.id !== clipId) } : track)), updatedAt: Date.now() }));
     };
 
+    const duplicateSelectedClip = () => {
+        if (!selectedClipInfo) return;
+        const nextId = nanoid();
+        const copy: VideoStudioClip = { ...selectedClipInfo.clip, id: nextId, startMs: selectedClipInfo.clip.startMs + selectedClipInfo.clip.durationMs, title: `${selectedClipInfo.clip.title || selectedClipInfo.clip.kind} 副本` };
+        setProject((value) => {
+            const tracks = value.tracks.map((track) => (track.id === selectedClipInfo.trackId ? { ...track, clips: [...track.clips, copy] } : track));
+            return { ...value, tracks, durationMs: calculateDuration({ ...value, tracks }), updatedAt: Date.now() };
+        });
+        setSelectedClipId(nextId);
+    };
+
     const clearTimeline = () => {
+        setSelectedClipId(null);
         setProject((value) => ({ ...value, tracks: value.tracks.map((track) => ({ ...track, clips: [] })), durationMs: 30000, updatedAt: Date.now() }));
         message.info("已清空时间线");
     };
 
     const addAllAssetsToTimeline = () => {
         setProject((value) => {
-            const media = value.assets.filter((asset) => asset.kind === "image" || asset.kind === "video");
-            let imageStart = value.tracks.find((track) => track.kind === "image")?.clips.reduce((max, clip) => Math.max(max, clip.startMs + clip.durationMs), 0) || 0;
-            let videoStart = value.tracks.find((track) => track.kind === "video")?.clips.reduce((max, clip) => Math.max(max, clip.startMs + clip.durationMs), 0) || 0;
-            const tracks = value.tracks.map((track) => {
+            const source = normalizeVideoStudioProject(value);
+            const media = source.assets.filter((asset) => asset.kind === "image" || asset.kind === "video");
+            let imageStart = source.tracks.find((track) => track.kind === "image")?.clips.reduce((max, clip) => Math.max(max, clip.startMs + clip.durationMs), 0) || 0;
+            let videoStart = source.tracks.find((track) => track.kind === "video")?.clips.reduce((max, clip) => Math.max(max, clip.startMs + clip.durationMs), 0) || 0;
+            const tracks = source.tracks.map((track) => {
                 if (track.kind !== "image" && track.kind !== "video") return track;
                 const nextClips = [...track.clips];
                 media.filter((asset) => asset.kind === track.kind).forEach((asset) => {
@@ -109,24 +194,29 @@ export default function VideoStudioPage() {
                 });
                 return { ...track, clips: nextClips };
             });
-            return { ...value, tracks, durationMs: Math.max(value.durationMs, imageStart, videoStart), updatedAt: Date.now() };
+            return { ...source, tracks, durationMs: Math.max(source.durationMs, imageStart, videoStart), updatedAt: Date.now() };
         });
         message.success("已将工程素材加入时间线");
     };
 
     const addAssetToTimeline = (asset: VideoStudioAssetRef) => {
         const targetKind = asset.kind === "video" ? "video" : "image";
+        const clipId = nanoid();
         setProject((value) => {
-            const trackIndex = value.tracks.findIndex((track) => track.kind === targetKind);
-            if (trackIndex < 0) return value;
-            const track = value.tracks[trackIndex];
+            const source = normalizeVideoStudioProject(value);
+            const trackIndex = source.tracks.findIndex((track) => track.kind === targetKind);
+            if (trackIndex < 0) return source;
+            const track = source.tracks[trackIndex];
             const startMs = track.clips.reduce((max, clip) => Math.max(max, clip.startMs + clip.durationMs), 0);
-            const clip = { id: nanoid(), trackId: track.id, assetId: asset.id, kind: targetKind, title: asset.title, startMs, durationMs: asset.kind === "video" && asset.durationMs ? asset.durationMs : 3000 };
-            const tracks = value.tracks.map((item, index) => (index === trackIndex ? { ...item, clips: [...item.clips, clip] } : item));
-            return { ...value, tracks, durationMs: Math.max(value.durationMs, startMs + clip.durationMs), updatedAt: Date.now() };
+            const clip = { id: clipId, trackId: track.id, assetId: asset.id, kind: targetKind, title: asset.title, startMs, durationMs: asset.kind === "video" && asset.durationMs ? asset.durationMs : 3000 };
+            const tracks = source.tracks.map((item, index) => (index === trackIndex ? { ...item, clips: [...item.clips, clip] } : item));
+            return { ...source, tracks, durationMs: Math.max(source.durationMs, startMs + clip.durationMs), updatedAt: Date.now() };
         });
+        setSelectedClipId(clipId);
         message.success("已加入时间线");
     };
+
+    const previewSize = previewBoxSize(project.aspectRatio);
 
     return (
         <main className="min-h-screen bg-slate-950 text-slate-100">
@@ -190,14 +280,28 @@ export default function VideoStudioPage() {
                 </aside>
 
                 <div className="flex min-w-0 flex-col">
-                    <div className="grid flex-1 grid-cols-[minmax(0,1fr)_320px] gap-4 p-4">
+                    <div className="grid flex-1 grid-cols-[minmax(0,1fr)_340px] gap-4 p-4">
                         <div className="flex min-h-[420px] items-center justify-center rounded-2xl border border-white/10 bg-black/50 p-6 shadow-inner">
-                            <div className="relative grid place-items-center rounded-xl border border-white/10 bg-slate-950 shadow-2xl" style={{ width: project.aspectRatio === "9:16" ? 236 : project.aspectRatio === "1:1" ? 360 : 520, height: project.aspectRatio === "9:16" ? 420 : project.aspectRatio === "1:1" ? 360 : 292 }}>
-                            <div className="text-center">
-                                <Sparkles className="mx-auto mb-3 size-10 text-purple-300" />
-                                <div className="text-lg font-semibold">预览画布</div>
-                                <p className="mt-2 max-w-md text-sm text-slate-400">下一阶段会迁移 MagicalCanvas 的时间线预览、画中画、字幕气泡和多轨音频控制；当前只落地 UI 壳和数据结构。</p>
-                            </div>
+                            <div className="relative overflow-hidden rounded-xl border border-white/10 bg-slate-950 shadow-2xl" style={{ width: previewSize.width, height: previewSize.height }}>
+                                {previewAsset?.kind === "image" && previewAsset.url ? (
+                                    <img src={previewAsset.url} alt={previewAsset.title} className="size-full object-contain" />
+                                ) : previewAsset?.kind === "video" && previewAsset.url ? (
+                                    <video key={previewAsset.id} src={previewAsset.url} className="size-full object-contain" controls muted playsInline />
+                                ) : (
+                                    <div className="grid size-full place-items-center p-8 text-center">
+                                        <div>
+                                            <Sparkles className="mx-auto mb-3 size-10 text-purple-300" />
+                                            <div className="text-lg font-semibold">预览画布</div>
+                                            <p className="mt-2 max-w-md text-sm text-slate-400">先选择时间线片段或加入素材，即可在此预览图片/视频片段。</p>
+                                        </div>
+                                    </div>
+                                )}
+                                {previewClipInfo ? (
+                                    <div className="absolute inset-x-3 bottom-3 rounded-lg bg-black/65 px-3 py-2 text-xs text-white backdrop-blur">
+                                        <div className="truncate font-medium">{previewClipInfo.clip.title || previewClipInfo.clip.kind}</div>
+                                        <div className="mt-1 text-white/70">{previewClipInfo.trackName} · {formatMs(previewClipInfo.clip.startMs)} - {formatMs(previewClipInfo.clip.startMs + previewClipInfo.clip.durationMs)}</div>
+                                    </div>
+                                ) : null}
                             </div>
                         </div>
                         <aside className="rounded-2xl border border-white/10 bg-slate-900/70 p-4">
@@ -213,6 +317,21 @@ export default function VideoStudioPage() {
                                         <div className="flex flex-wrap gap-2">{project.assets.map((asset) => <span key={asset.id} className="inline-flex items-center rounded border border-white/10 bg-white/[0.04] text-xs"><button type="button" className="px-2 py-1 hover:bg-white/[0.08]" onClick={() => addAssetToTimeline(asset)}><span className={asset.kind === "video" ? "text-sky-300" : "text-purple-300"}>{asset.kind === "video" ? "视频" : "图片"}</span><span className="ml-1 text-slate-100">{asset.title}</span><span className="ml-1 text-slate-500">+时间线</span></button><button type="button" className="border-l border-white/10 px-1.5 py-1 text-slate-500 hover:text-red-300" title="移除素材" onClick={() => removeAssetFromProject(asset.id)}>×</button></span>)}</div>
                                     </>
                                 ) : <div className="text-xs text-slate-500">尚未加入素材</div>}
+                            </div>
+                            <div className="mb-4 rounded-xl border border-white/10 bg-white/[0.03] p-3">
+                                <div className="mb-2 text-sm font-medium">选中片段</div>
+                                {selectedClipInfo ? (
+                                    <div className="space-y-2 text-xs text-slate-300">
+                                        <div className="grid grid-cols-2 gap-2"><span className="text-slate-500">轨道</span><span>{selectedClipInfo.trackName}</span></div>
+                                        <Input size="small" value={selectedClipInfo.clip.title || ""} placeholder="片段名称" onChange={(event) => updateClip(selectedClipInfo.clip.id, { title: event.target.value })} />
+                                        <div className="grid grid-cols-2 gap-2">
+                                            <label className="space-y-1"><span className="text-slate-500">起始(s)</span><Input size="small" type="number" min={0} value={Math.round(selectedClipInfo.clip.startMs / 100) / 10} onChange={(event) => updateClip(selectedClipInfo.clip.id, { startMs: Math.max(0, Number(event.target.value || 0) * 1000) })} /></label>
+                                            <label className="space-y-1"><span className="text-slate-500">时长(s)</span><Input size="small" type="number" min={0.1} value={Math.round(selectedClipInfo.clip.durationMs / 100) / 10} onChange={(event) => updateClip(selectedClipInfo.clip.id, { durationMs: Math.max(100, Number(event.target.value || 0.1) * 1000) })} /></label>
+                                        </div>
+                                        {selectedAsset ? <div className="truncate text-slate-500">素材：{selectedAsset.title}</div> : null}
+                                        <div className="flex gap-2"><Button size="small" onClick={duplicateSelectedClip}>复制</Button><Button size="small" danger onClick={() => removeClip(selectedClipInfo.trackId, selectedClipInfo.clip.id)}>删除</Button></div>
+                                    </div>
+                                ) : <div className="text-xs text-slate-500">点击时间线片段后，可以预览、修改起始时间/时长或复制片段。</div>}
                             </div>
                             <div className="space-y-2">
                                 {project.tracks.map((track) => (
@@ -231,13 +350,16 @@ export default function VideoStudioPage() {
                     <footer className="border-t border-white/10 bg-slate-900/80 p-4">
                         <div className="mb-2 flex items-center justify-between text-sm">
                             <span className="font-medium">时间线</span>
-                            <span className="text-slate-500">多轨视频 / 旁白 / 音乐 / 字幕</span>
+                            <span className="text-slate-500">单击选中 / 双击删除；已迁移多轨预览与本地片段管理</span>
                         </div>
                         <div className="space-y-2">
                             {project.tracks.map((track) => (
-                                <div key={track.id} className="grid grid-cols-[96px_minmax(0,1fr)] items-center gap-3">
+                                <div key={track.id} className="grid grid-cols-[108px_minmax(0,1fr)] items-center gap-3">
                                     <div className="truncate text-xs text-slate-400">{track.name}</div>
-                                    <div className="flex h-10 items-center gap-1 rounded-lg border border-dashed border-white/10 bg-white/[0.03] px-1">{track.clips.map((clip) => <button key={clip.id} type="button" className="flex h-7 min-w-20 items-center rounded bg-purple-500/30 px-2 text-left text-xs text-purple-50 hover:bg-red-500/40" style={{ width: `${Math.max(80, clip.durationMs / 40)}px` }} title="点击删除片段" onClick={() => removeClip(track.id, clip.id)}>{clip.title || clip.kind}</button>)}</div>
+                                    <div className="flex h-12 items-center gap-1 overflow-x-auto rounded-lg border border-dashed border-white/10 bg-white/[0.03] px-1">{track.clips.map((clip) => {
+                                        const selected = selectedClipId === clip.id;
+                                        return <button key={clip.id} type="button" className={`flex h-8 min-w-20 items-center rounded px-2 text-left text-xs ring-1 transition ${TRACK_COLORS[clip.kind]} ${selected ? "ring-2 ring-white shadow-[0_0_0_1px_rgba(255,255,255,0.35)]" : "ring-white/10 hover:ring-white/40"}`} style={{ width: `${Math.max(80, clip.durationMs / 40)}px` }} title="单击选中，双击删除片段" onClick={() => setSelectedClipId(clip.id)} onDoubleClick={() => removeClip(track.id, clip.id)}><span className="truncate">{clip.title || clip.kind}</span></button>;
+                                    })}</div>
                                 </div>
                             ))}
                         </div>
