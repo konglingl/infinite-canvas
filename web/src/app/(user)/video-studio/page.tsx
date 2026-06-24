@@ -94,6 +94,23 @@ export default function VideoStudioPage() {
         if (selectedClipId && !selectedClipInfo) setSelectedClipId(null);
     }, [selectedClipId, selectedClipInfo]);
 
+    useEffect(() => {
+        const onKeyDown = (event: KeyboardEvent) => {
+            const target = event.target as HTMLElement | null;
+            if (target && ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName)) return;
+            if (event.key === "Escape") {
+                setSelectedClipId(null);
+                return;
+            }
+            if ((event.key === "Delete" || event.key === "Backspace") && selectedClipInfo) {
+                event.preventDefault();
+                removeClip(selectedClipInfo.trackId, selectedClipInfo.clip.id);
+            }
+        };
+        window.addEventListener("keydown", onKeyDown);
+        return () => window.removeEventListener("keydown", onKeyDown);
+    }, [selectedClipInfo]);
+
     const saveProject = async () => {
         const saved = await saveVideoStudioProject(normalizeVideoStudioProject(project));
         setProject(saved);
