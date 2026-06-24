@@ -1,0 +1,41 @@
+---
+title: 上游来源与合并策略
+description: 生图项目使用的上游仓库来源和后续合并规则
+---
+
+# 上游来源与合并策略
+
+当前生图项目主仓库：
+
+- <https://github.com/konglingl/infinite-canvas>
+
+后续持续跟踪的上游：
+
+- <https://github.com/basketikun/infinite-canvas/releases>
+- <https://github.com/HuFakai/infinite-canvas/releases>
+- <https://github.com/28998306/MagicalCanvas>
+
+## 当前版本
+
+- 生图项目版本：`2026-06-23 版本`
+- 上一次大范围整合基线：`2026-06-05`
+
+## 合并原则
+
+- 以当前生图项目已有的视频、音频、画布、账号、后台渠道、算力点和部署能力为准。
+- `basketikun/infinite-canvas` 在 `2026-06-05` 之后的更新可按功能拆分逐项合并。
+- `HuFakai/infinite-canvas` 最近两次移除视频 / 音频入口的更新不能整体合并；只挑选不会破坏现有视频、音频入口和生成流程的修复。
+- `MagicalCanvas` 已简单吸收一键故事工作流思路，后续需要继续评估其视频剪辑工作室、AI 配音、字幕、时间线和 FFmpeg 导出等功能，按 Web/Docker 环境可迁移程度分批合并。
+
+## 本地分析资料
+
+上游源码已拉取到本地工作区：
+
+- `_upstreams_20260624/basketikun-infinite-canvas`
+- `_upstreams_20260624/HuFakai-infinite-canvas`
+- `_upstreams_20260624/MagicalCanvas`
+
+本地分析报告：
+
+- `_upstreams_20260624/analysis_since_20260605.md`
+- `_upstreams_20260624/upstream_merge_strategy_20260624.md`

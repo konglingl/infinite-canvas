@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 2026-06-23 版本 - 2026-06-23
+
++ [调整] 生图项目版本号更新为 `2026-06-23 版本`。
++ [说明] 本项目以上游 `https://github.com/konglingl/infinite-canvas` 为当前生图项目主仓库，后续持续有机合并 `https://github.com/basketikun/infinite-canvas/releases`、`https://github.com/HuFakai/infinite-canvas/releases` 与 `https://github.com/28998306/MagicalCanvas` 的适配更新。
++ [注意] HuFakai/infinite-canvas 最近移除视频 / 音频入口的更新不做整体合并，仅挑选不破坏当前视频、音频、画布和生图能力的安全修复。
+
 ## 2026.06.05 版本 - 2026-06-05
 
 + [调整] 项目版本体系改为日期版本，当前版本标记为 `2026.06.05 版本`，不再沿用 HuFakai / basketikun 原开源仓库的 `v0.x.x` 版本号。
