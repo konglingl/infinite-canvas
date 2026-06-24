@@ -27,11 +27,12 @@ type CanvasNodePromptPanelProps = {
     onPromptChange: (nodeId: string, prompt: string) => void;
     onConfigChange: (nodeId: string, patch: Partial<CanvasNodeData["metadata"]>) => void;
     onGenerate: (nodeId: string, mode: CanvasNodeGenerationMode, prompt: string) => void;
+    onStopGeneration?: () => void;
     mentionReferences?: CanvasResourceReference[];
     onImageSettingsOpenChange?: (open: boolean) => void;
 };
 
-export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfigChange, onGenerate, mentionReferences = [], onImageSettingsOpenChange }: CanvasNodePromptPanelProps) {
+export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfigChange, onGenerate, onStopGeneration, mentionReferences = [], onImageSettingsOpenChange }: CanvasNodePromptPanelProps) {
     const globalConfig = useEffectiveConfig();
     const modelCosts = useConfigStore((state) => state.publicSettings?.modelChannel.modelCosts);
     const updateConfig = useConfigStore((state) => state.updateConfig);
@@ -59,7 +60,11 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
 
     const submit = () => {
         const text = prompt.trim();
-        if (!text || isRunning) return;
+        if (isRunning) {
+            onStopGeneration?.();
+            return;
+        }
+        if (!text) return;
         onGenerate(node.id, mode, text);
         setPrompt("");
     };
@@ -116,8 +121,10 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                 <Button
                     type="primary"
                     className="!h-10 !min-w-16 shrink-0 !rounded-full !px-3"
-                    disabled={isRunning || !prompt.trim()}
+                    disabled={!isRunning && !prompt.trim()}
                     onClick={submit}
+                            title={isRunning ? "停止生成" : "开始生成"}
+                            aria-label={isRunning ? "停止生成" : "开始生成"}
                     aria-label="生成"
                 >
                     <span className="flex items-center gap-1.5">
