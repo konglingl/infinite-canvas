@@ -12,14 +12,14 @@ import { clearDefaultBrowserCache } from "@/services/browser-cache-cleanup";
 import { createFullLocalDataBackup, restoreFullLocalDataBackup, type FullLocalBackupExtraFile } from "@/services/local-full-backup";
 import { chooseLocalBackupFolder, forgetLocalBackupFolder, getLocalAutoBackupSettings, getLocalBackupFolderInfo, isLocalBackupFolderSupported, saveBlobToLocalBackupFolder, saveLocalAutoBackupSettings, type AutoBackupMediaKind, type LocalAutoBackupSettings, type LocalBackupFolderInfo } from "@/services/local-backup-folder";
 import { useAssetStore } from "@/stores/use-asset-store";
-import { defaultWebdavBackupConfig, getWebdavBackupConfig, saveWebdavBackupConfig, testWebdavBackupConnection, uploadWebdavBackupFile, type WebdavBackupConfig } from "@/services/webdav-backup";
+import { defaultWebdavBackupConfig, getWebdavBackupConfig, saveWebdavBackupConfig, downloadWebdavBackupFile, testWebdavBackupConnection, uploadWebdavBackupFile, type WebdavBackupConfig } from "@/services/webdav-backup";
 
 type LocalDataSettingsModalProps = {
     open: boolean;
     onClose: () => void;
 };
 
-type LoadingAction = "chooseFolder" | "forgetFolder" | "backupAll" | "downloadAll" | "importAll" | "backupWebdav" | "testWebdav" | "backupCanvas" | "downloadCanvas" | "importCanvas" | "backupAssets" | "downloadAssets" | "importAssets" | "clearCache" | null;
+type LoadingAction = "chooseFolder" | "forgetFolder" | "backupAll" | "downloadAll" | "importAll" | "backupWebdav" | "restoreWebdav" | "testWebdav" | "backupCanvas" | "downloadCanvas" | "importCanvas" | "backupAssets" | "downloadAssets" | "importAssets" | "clearCache" | null;
 
 export function LocalDataSettingsModal({ open, onClose }: LocalDataSettingsModalProps) {
     const { message, modal } = App.useApp();
@@ -31,6 +31,7 @@ export function LocalDataSettingsModal({ open, onClose }: LocalDataSettingsModal
     const [folderSupported, setFolderSupported] = useState(false);
     const [autoBackupSettings, setAutoBackupSettings] = useState<LocalAutoBackupSettings | null>(null);
     const [webdavConfig, setWebdavConfig] = useState<WebdavBackupConfig>(defaultWebdavBackupConfig);
+    const [webdavRestorePath, setWebdavRestorePath] = useState("");
     const canvasProjects = useCanvasStore((state) => state.projects);
     const importProject = useCanvasStore((state) => state.importProject);
     const assets = useAssetStore((state) => state.assets);
@@ -149,7 +150,22 @@ export function LocalDataSettingsModal({ open, onClose }: LocalDataSettingsModal
         runAction("backupWebdav", async () => {
             const backup = await createCompleteBackup();
             const uploaded = await uploadWebdavBackupFile(webdavConfig, backup.fileName, backup.blob);
+            setWebdavRestorePath(uploaded.path);
             message.success(`全部本地业务数据已上传到 WebDAV：${uploaded.path}`);
+        });
+
+    const restoreAllFromWebdav = () =>
+        runAction("restoreWebdav", async () => {
+            const path = webdavRestorePath.trim();
+            if (!path) {
+                message.warning("请填写 WebDAV 备份文件路径");
+                return;
+            }
+            const blob = await downloadWebdavBackupFile(webdavConfig, path);
+            const file = new File([blob], path.split("/").pop() || "webdav-backup.zip", { type: blob.type || "application/zip" });
+            const result = await restoreFullLocalDataBackup(file);
+            message.success(`已从 WebDAV 恢复 ${result.restoredEntries} 条本地数据，其中媒体文件 ${result.restoredBlobs} 个，即将刷新页面`);
+            window.setTimeout(() => window.location.reload(), 900);
         });
 
     const importAllZip = (file?: File) => {

@@ -29,6 +29,13 @@ export async function testWebdavBackupConnection(config: WebdavBackupConfig) {
     await ensureDirectory(config);
 }
 
+export async function downloadWebdavBackupFile(config: WebdavBackupConfig, path: string) {
+    assertConfig(config);
+    const response = await webdavFetch(config, path, { method: "GET" });
+    if (!response.ok) throw new Error(await readWebdavError(response, "WebDAV 下载失败"));
+    return await response.blob();
+}
+
 export async function uploadWebdavBackupFile(config: WebdavBackupConfig, fileName: string, blob: Blob) {
     assertConfig(config);
     await ensureDirectory(config);
