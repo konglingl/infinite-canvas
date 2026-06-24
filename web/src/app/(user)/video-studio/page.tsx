@@ -7,7 +7,7 @@ import { useRouter } from "next/navigation";
 import { nanoid } from "nanoid";
 import { saveAs } from "file-saver";
 
-import { defaultVideoStudioProject, type VideoStudioAssetRef, type VideoStudioProject } from "./types";
+import { defaultVideoStudioProject, normalizeVideoStudioProject, type VideoStudioAssetRef, type VideoStudioProject } from "./types";
 import { deleteVideoStudioProject, listVideoStudioProjects, saveVideoStudioProject } from "./storage";
 import { useAssetStore, type Asset } from "@/stores/use-asset-store";
 
@@ -20,14 +20,14 @@ export default function VideoStudioPage() {
     const assets = useAssetStore((state) => state.assets);
     const mediaAssets = assets.filter((asset) => asset.kind === "image" || asset.kind === "video");
 
-    const refreshProjects = async () => setProjects(await listVideoStudioProjects());
+    const refreshProjects = async () => setProjects((await listVideoStudioProjects()).map(normalizeVideoStudioProject));
 
     useEffect(() => {
         void refreshProjects();
     }, []);
 
     const saveProject = async () => {
-        const saved = await saveVideoStudioProject(project);
+        const saved = await saveVideoStudioProject(normalizeVideoStudioProject(project));
         setProject(saved);
         await refreshProjects();
         message.success("视频工程已保存到本地");
@@ -42,7 +42,7 @@ export default function VideoStudioPage() {
         if (!file) return;
         const payload = JSON.parse(await file.text()) as { type?: string; project?: VideoStudioProject };
         if (payload.type !== "infinite-canvas-video-studio-project" || !payload.project?.id) throw new Error("不是有效的视频工程文件");
-        const next = await saveVideoStudioProject({ ...payload.project, id: payload.project.id || nanoid(), updatedAt: Date.now() });
+        const next = await saveVideoStudioProject(normalizeVideoStudioProject({ ...payload.project, id: payload.project.id || nanoid(), updatedAt: Date.now() }));
         setProject(next);
         await refreshProjects();
         message.success("视频工程已导入");
@@ -178,7 +178,7 @@ export default function VideoStudioPage() {
                         <div className="space-y-2">
                             {projects.length ? projects.map((item) => (
                                 <div key={item.id} className="rounded-lg border border-white/10 bg-white/[0.03] p-2 text-sm">
-                                    <button type="button" className="w-full text-left hover:bg-white/[0.04]" onClick={() => setProject(item)}>
+                                    <button type="button" className="w-full text-left hover:bg-white/[0.04]" onClick={() => setProject(normalizeVideoStudioProject(item))}>
                                         <div className="truncate text-slate-100">{item.title}</div>
                                         <div className="mt-1 text-xs text-slate-500">{new Date(item.updatedAt).toLocaleString()}</div>
                                     </button>
