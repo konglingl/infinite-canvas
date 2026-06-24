@@ -45,6 +45,20 @@ export default function VideoStudioPage() {
         message.success("已加入当前视频工程");
     };
 
+    const addAssetToTimeline = (asset: VideoStudioAssetRef) => {
+        const targetKind = asset.kind === "video" ? "video" : "image";
+        setProject((value) => {
+            const trackIndex = value.tracks.findIndex((track) => track.kind === targetKind);
+            if (trackIndex < 0) return value;
+            const track = value.tracks[trackIndex];
+            const startMs = track.clips.reduce((max, clip) => Math.max(max, clip.startMs + clip.durationMs), 0);
+            const clip = { id: nanoid(), trackId: track.id, assetId: asset.id, kind: targetKind, title: asset.title, startMs, durationMs: asset.kind === "video" && asset.durationMs ? asset.durationMs : 3000 };
+            const tracks = value.tracks.map((item, index) => (index === trackIndex ? { ...item, clips: [...item.clips, clip] } : item));
+            return { ...value, tracks, durationMs: Math.max(value.durationMs, startMs + clip.durationMs), updatedAt: Date.now() };
+        });
+        message.success("已加入时间线");
+    };
+
     return (
         <main className="min-h-screen bg-slate-950 text-slate-100">
             <header className="flex items-center justify-between border-b border-white/10 px-6 py-4">
@@ -113,7 +127,7 @@ export default function VideoStudioPage() {
                             <div className="mb-3 flex items-center gap-2 font-medium"><Layers3 className="size-4" />工程结构</div>
                             <div className="mb-4 rounded-xl border border-white/10 bg-white/[0.03] p-3">
                                 <div className="mb-2 text-sm font-medium">工程素材</div>
-                                {project.assets.length ? <div className="flex flex-wrap gap-2">{project.assets.map((asset) => <Tag key={asset.id} color={asset.kind === "video" ? "blue" : "purple"}>{asset.title}</Tag>)}</div> : <div className="text-xs text-slate-500">尚未加入素材</div>}
+                                {project.assets.length ? <div className="flex flex-wrap gap-2">{project.assets.map((asset) => <button key={asset.id} type="button" className="rounded border border-white/10 bg-white/[0.04] px-2 py-1 text-xs hover:bg-white/[0.08]" onClick={() => addAssetToTimeline(asset)}><span className={asset.kind === "video" ? "text-sky-300" : "text-purple-300"}>{asset.kind === "video" ? "视频" : "图片"}</span><span className="ml-1 text-slate-100">{asset.title}</span><span className="ml-1 text-slate-500">+时间线</span></button>)}</div> : <div className="text-xs text-slate-500">尚未加入素材</div>}
                             </div>
                             <div className="space-y-2">
                                 {project.tracks.map((track) => (
@@ -138,7 +152,7 @@ export default function VideoStudioPage() {
                             {project.tracks.map((track) => (
                                 <div key={track.id} className="grid grid-cols-[96px_minmax(0,1fr)] items-center gap-3">
                                     <div className="truncate text-xs text-slate-400">{track.name}</div>
-                                    <div className="h-10 rounded-lg border border-dashed border-white/10 bg-white/[0.03]" />
+                                    <div className="flex h-10 items-center gap-1 rounded-lg border border-dashed border-white/10 bg-white/[0.03] px-1">{track.clips.map((clip) => <div key={clip.id} className="flex h-7 min-w-20 items-center rounded bg-purple-500/30 px-2 text-xs text-purple-50" style={{ width: `${Math.max(80, clip.durationMs / 40)}px` }} title={clip.title}>{clip.title || clip.kind}</div>)}</div>
                                 </div>
                             ))}
                         </div>
