@@ -32,7 +32,10 @@ export async function testWebdavBackupConnection(config: WebdavBackupConfig) {
 export async function uploadWebdavBackupFile(config: WebdavBackupConfig, fileName: string, blob: Blob) {
     assertConfig(config);
     await ensureDirectory(config);
-    const path = `${normalizePath(config.directory)}/${safeName(fileName)}`;
+    const relativeName = safeRelativeFileName(fileName);
+    const path = `${normalizePath(config.directory)}/${relativeName}`;
+    const parent = path.split("/").slice(0, -1).join("/");
+    if (parent) await ensureWebdavDirectoryPath(config, parent);
     const response = await webdavFetch(config, path, { method: "PUT", headers: { "Content-Type": blob.type || "application/octet-stream" }, body: blob });
     if (!response.ok) throw new Error(await readWebdavError(response, "WebDAV 上传失败"));
     return { path, url: buildWebdavUrl(config, path) };
@@ -55,7 +58,11 @@ function assertConfig(config: WebdavBackupConfig) {
 }
 
 async function ensureDirectory(config: WebdavBackupConfig) {
-    const parts = normalizePath(config.directory).split("/").filter(Boolean);
+    return ensureWebdavDirectoryPath(config, config.directory);
+}
+
+async function ensureWebdavDirectoryPath(config: WebdavBackupConfig, directory: string) {
+    const parts = normalizePath(directory).split("/").filter(Boolean);
     let current = "";
     for (const part of parts) {
         current = current ? `${current}/${part}` : part;
@@ -85,6 +92,11 @@ function buildWebdavUrl(config: WebdavBackupConfig, path: string) {
 
 function normalizePath(path: string) {
     return path.replace(/\\/g, "/").split("/").map((part) => part.trim()).filter(Boolean).join("/");
+}
+
+function safeRelativeFileName(name: string) {
+    const parts = name.replace(/\\/g, "/").split("/").map((part) => safeName(part)).filter(Boolean);
+    return parts.join("/") || `backup-${Date.now()}.zip`;
 }
 
 function safeName(name: string) {

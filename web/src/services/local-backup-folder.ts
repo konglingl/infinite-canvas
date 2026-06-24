@@ -1,6 +1,7 @@
 "use client";
 
 import localforage from "localforage";
+import { getWebdavBackupConfig, uploadWebdavBackupFile } from "@/services/webdav-backup";
 
 type BackupPermissionMode = "read" | "readwrite";
 type BackupPermissionState = "granted" | "denied" | "prompt";
@@ -121,11 +122,13 @@ export async function autoSaveGeneratedMediaToLocalBackupFolder(input: Generated
     const settings = await getLocalAutoBackupSettings();
     const item = settings[input.kind];
     if (!settings.enabled || !item.enabled) return null;
+    const fileName = generatedMediaBackupFileName(input);
+    void autoSaveBlobToWebdavBackup(`${item.subfolder}/${fileName}`, input.blob);
+
     const root = await loadWritableBackupDirectoryForAutoSave();
     if (!root) return null;
 
     const folder = await resolveBackupSubfolder(root, item.subfolder);
-    const fileName = generatedMediaBackupFileName(input);
     const fileHandle = await folder.getFileHandle(fileName, { create: true });
     await writeBackupFile(fileHandle, input.blob);
     return { folderName: folder.name, fileName };
@@ -134,16 +137,27 @@ export async function autoSaveGeneratedMediaToLocalBackupFolder(input: Generated
 export async function autoSaveCanvasArchiveToLocalBackupFolder(blob: Blob) {
     const settings = await getLocalAutoBackupSettings();
     if (!settings.enabled || !settings.canvas.enabled) return null;
+    const keepArchives = Math.max(1, Math.min(9, Math.floor(settings.canvas.keepArchives || DEFAULT_LOCAL_AUTO_BACKUP_SETTINGS.canvas.keepArchives)));
+    const slot = await nextCanvasArchiveSlot(keepArchives);
+    const fileName = `canvas-auto-${slot}.zip`;
+    void autoSaveBlobToWebdavBackup(`${settings.canvas.subfolder}/${fileName}`, blob);
+
     const root = await loadWritableBackupDirectoryForAutoSave();
     if (!root) return null;
 
     const folder = await resolveBackupSubfolder(root, settings.canvas.subfolder);
-    const keepArchives = Math.max(1, Math.min(9, Math.floor(settings.canvas.keepArchives || DEFAULT_LOCAL_AUTO_BACKUP_SETTINGS.canvas.keepArchives)));
-    const slot = await nextCanvasArchiveSlot(keepArchives);
-    const fileName = `canvas-auto-${slot}.zip`;
     const fileHandle = await folder.getFileHandle(fileName, { create: true });
     await writeBackupFile(fileHandle, blob);
     return { folderName: folder.name, fileName };
+}
+
+async function autoSaveBlobToWebdavBackup(fileName: string, blob: Blob) {
+    const config = await getWebdavBackupConfig().catch(() => null);
+    if (!config?.enabled) return null;
+    return uploadWebdavBackupFile(config, fileName, blob).catch((error) => {
+        console.warn("WebDAV auto backup failed", error);
+        return null;
+    });
 }
 
 async function loadBackupDirectoryHandle() {
