@@ -232,6 +232,7 @@ export function CreativeWorkflowWorkspace({
     const [seriesDrafts, setSeriesDrafts] = useState<SeriesPromptDraft[]>([]);
     const [seriesDraftLoading, setSeriesDraftLoading] = useState(false);
     const [seriesBatchAppend, setSeriesBatchAppend] = useState("");
+    const [seriesBatchRunning, setSeriesBatchRunning] = useState(false);
     const [now, setNow] = useState(Date.now());
     const [query, setQuery] = useState("");
     const [workflowCategory, setWorkflowCategory] = useState("all");
@@ -248,6 +249,7 @@ export function CreativeWorkflowWorkspace({
     const [agentAssetPickerOpen, setAgentAssetPickerOpen] = useState(false);
     const workflowSyncEnabledRef = useRef(false);
     const seriesDraftsLoadedRef = useRef(false);
+    const stopSeriesBatchRef = useRef(false);
 
     const filteredWorkflows = useMemo(() => {
         const text = query.trim().toLowerCase();
@@ -649,17 +651,31 @@ export function CreativeWorkflowWorkspace({
         return startWorkflowImageTask(runningWorkflow, draft.prompt.trim(), { ...inputValues }, [...workflowReferences], 1, draft.id, draft.title || `第 ${index + 1} 张`, index + 1);
     };
 
+    const stopSeriesBatch = () => {
+        stopSeriesBatchRef.current = true;
+        setSeriesBatchRunning(false);
+        message.info("已停止批量生成队列，正在运行的请求会自然结束");
+    };
+
     const runAllSeriesDrafts = async () => {
         if (!runningWorkflow) return;
+        stopSeriesBatchRef.current = false;
+        setSeriesBatchRunning(true);
         const drafts = activeSeriesDrafts.filter((item) => item.prompt.trim() && item.status !== "running");
         if (!drafts.length) {
             message.warning("没有可生成的提示词");
             return;
         }
         const concurrency = Math.max(1, Math.min(20, Number(runningWorkflow.seriesConfig.concurrency) || 3));
-        for (let index = 0; index < drafts.length; index += concurrency) {
-            const batch = drafts.slice(index, index + concurrency);
-            await Promise.all(batch.map((draft) => runSeriesDraft(draft, Math.max(0, seriesDrafts.findIndex((item) => item.id === draft.id)))));
+        try {
+            for (let index = 0; index < drafts.length; index += concurrency) {
+                if (stopSeriesBatchRef.current) break;
+                const batch = drafts.slice(index, index + concurrency);
+                await Promise.all(batch.map((draft) => runSeriesDraft(draft, Math.max(0, seriesDrafts.findIndex((item) => item.id === draft.id)))));
+            }
+        } finally {
+            setSeriesBatchRunning(false);
+            stopSeriesBatchRef.current = false;
         }
     };
 
