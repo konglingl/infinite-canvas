@@ -362,6 +362,22 @@ export function useEffectiveConfig() {
     return useMemo(() => resolveEffectiveConfig(config, modelChannel, canUseCustomChannel), [config, modelChannel, canUseCustomChannel]);
 }
 
+
+export function modelOptionName(model: string) {
+    return String(model || "").split("::").pop() || model;
+}
+
+export function resolveModelRequestConfig(config: AiConfig, model: string): AiConfig {
+    const channel = Array.isArray(config.modelChannels) ? config.modelChannels.find((item) => item.models?.includes(model) || item.models?.includes(modelOptionName(model))) : null;
+    if (!channel) return config;
+    return {
+        ...config,
+        model,
+        apiKey: channel.apiKey || config.apiKey,
+        apiProxyUrl: channel.apiProxyUrl || config.apiProxyUrl,
+    };
+}
+
 export function channelIdForActiveModel(config: AiConfig) {
     if (config.activeChannelId) return config.activeChannelId;
     if (config.model === config.videoModel) return config.videoChannelId;
