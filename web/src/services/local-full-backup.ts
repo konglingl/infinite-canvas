@@ -31,6 +31,7 @@ const SNAPSHOT_STORES: SnapshotStoreConfig[] = [
     { storeName: "video_generation_logs", label: "video_workspace_logs" },
     { storeName: "image_generation_categories", label: "image_workspace_categories" },
     { storeName: "creative_workflows", label: "creative_workflows" },
+    { storeName: "video_studio_projects", label: "video_studio_projects" },
     { storeName: "image_files", label: "image_blobs" },
     { storeName: "media_files", label: "video_audio_media_blobs" },
 ];
@@ -98,7 +99,7 @@ export async function createFullLocalDataBackup(fileBaseName: string, extraFiles
                 totalBlobBytes,
                 extraFiles: extraFiles.map((file) => file.name),
                 excluded: ["auth token", "api key config", "theme", "local backup folder permission handle", "browser CacheStorage"],
-                note: "Includes canvas/assets state, image workspace logs, video workspace logs, creative workflows, image blobs, video blobs and audio blobs. Excludes login state, API keys, theme and basic settings.",
+                note: "Includes canvas/assets state, image workspace logs, video workspace logs, creative workflows, video studio projects, image blobs, video blobs and audio blobs. Excludes login state, API keys, theme and basic settings.",
             },
             null,
             2,
