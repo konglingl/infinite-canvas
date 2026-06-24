@@ -11,6 +11,9 @@ import { defaultVideoStudioProject, normalizeVideoStudioProject, type VideoStudi
 import { deleteVideoStudioProject, listVideoStudioProjects, saveVideoStudioProject } from "./storage";
 import { useAssetStore, type Asset } from "@/stores/use-asset-store";
 
+const VIDEO_STUDIO_PROJECT_EXPORT_TYPE = "infinite-canvas-video-studio-project";
+const VIDEO_STUDIO_PROJECT_SCHEMA_VERSION = 2;
+
 type ClipInfo = {
     clip: VideoStudioClip;
     trackId: string;
@@ -120,13 +123,20 @@ export default function VideoStudioPage() {
     };
 
     const exportProject = () => {
-        const blob = new Blob([JSON.stringify({ type: "infinite-canvas-video-studio-project", version: 1, project }, null, 2)], { type: "application/json" });
+        const normalized = normalizeVideoStudioProject(project);
+        const payload = {
+            type: VIDEO_STUDIO_PROJECT_EXPORT_TYPE,
+            schemaVersion: VIDEO_STUDIO_PROJECT_SCHEMA_VERSION,
+            exportedAt: new Date().toISOString(),
+            project: normalized,
+        };
+        const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
         saveAs(blob, `${project.title || "video-studio-project"}.json`);
     };
 
     const importProject = async (file?: File) => {
         if (!file) return;
-        const payload = JSON.parse(await file.text()) as { type?: string; project?: VideoStudioProject };
+        const payload = JSON.parse(await file.text()) as { type?: string; version?: number; schemaVersion?: number; project?: VideoStudioProject };
         if (payload.type !== "infinite-canvas-video-studio-project" || !payload.project?.id) throw new Error("不是有效的视频工程文件");
         const next = await saveVideoStudioProject(normalizeVideoStudioProject({ ...payload.project, id: payload.project.id || nanoid(), updatedAt: Date.now() }));
         setProject(next);
