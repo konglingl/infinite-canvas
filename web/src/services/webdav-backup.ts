@@ -6,12 +6,13 @@ export type WebdavBackupConfig = {
     username: string;
     password: string;
     directory: string;
+    lastBackupPath?: string;
 };
 
 const store = localforage.createInstance({ name: "infinite-canvas", storeName: "webdav_backup" });
 const WEBDAV_BACKUP_CONFIG_KEY = "infinite-canvas:webdav_backup_config";
 
-export const defaultWebdavBackupConfig: WebdavBackupConfig = { enabled: false, url: "", username: "", password: "", directory: "infinite-canvas-backups" };
+export const defaultWebdavBackupConfig: WebdavBackupConfig = { enabled: false, url: "", username: "", password: "", directory: "infinite-canvas-backups", lastBackupPath: "" };
 
 export async function getWebdavBackupConfig() {
     const saved = await store.getItem<Partial<WebdavBackupConfig>>(WEBDAV_BACKUP_CONFIG_KEY);
@@ -55,6 +56,7 @@ function normalizeWebdavBackupConfig(config?: Partial<WebdavBackupConfig> | null
         username: String(config?.username || ""),
         password: String(config?.password || ""),
         directory: normalizePath(config?.directory || defaultWebdavBackupConfig.directory),
+        lastBackupPath: normalizePath(config?.lastBackupPath || ""),
     };
 }
 

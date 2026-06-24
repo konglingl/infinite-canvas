@@ -42,7 +42,7 @@ export function LocalDataSettingsModal({ open, onClose }: LocalDataSettingsModal
         if (!open) return;
         const supported = isLocalBackupFolderSupported();
         void getLocalAutoBackupSettings().then(setAutoBackupSettings).catch(() => setAutoBackupSettings(null));
-        void getWebdavBackupConfig().then(setWebdavConfig).catch(() => setWebdavConfig(defaultWebdavBackupConfig));
+        void getWebdavBackupConfig().then((config) => { setWebdavConfig(config); setWebdavRestorePath(config.lastBackupPath || ""); }).catch(() => setWebdavConfig(defaultWebdavBackupConfig));
         setFolderSupported(supported);
         if (!supported) {
             setBackupFolder(null);
@@ -150,6 +150,8 @@ export function LocalDataSettingsModal({ open, onClose }: LocalDataSettingsModal
         runAction("backupWebdav", async () => {
             const backup = await createCompleteBackup();
             const uploaded = await uploadWebdavBackupFile(webdavConfig, backup.fileName, backup.blob);
+            const nextConfig = await saveWebdavBackupConfig({ ...webdavConfig, lastBackupPath: uploaded.path });
+            setWebdavConfig(nextConfig);
             setWebdavRestorePath(uploaded.path);
             message.success(`全部本地业务数据已上传到 WebDAV：${uploaded.path}`);
         });
