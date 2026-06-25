@@ -769,6 +769,8 @@ function InfiniteCanvasPage() {
     const [assetPickerOpen, setAssetPickerOpen] = useState(false);
     const [assetPickerTab, setAssetPickerTab] = useState<AssetPickerTab>("my-assets");
     const [projectLoaded, setProjectLoaded] = useState(false);
+    const [projectMissing, setProjectMissing] = useState(false);
+    const [projectLoadError, setProjectLoadError] = useState<string | null>(null);
     const [toolbarNodeId, setToolbarNodeId] = useState<string | null>(null);
     const [nodeImageSettingsOpen, setNodeImageSettingsOpen] = useState(false);
     const [dialogNodeId, setDialogNodeId] = useState<string | null>(null);
@@ -822,41 +824,58 @@ function InfiniteCanvasPage() {
     useEffect(() => {
         if (!hydrated) return;
         setProjectLoaded(false);
+        setProjectMissing(false);
+        setProjectLoadError(null);
         const project = openProject(projectId);
         if (!project) {
-            router.replace("/canvas");
+            setProjectMissing(true);
             return;
         }
 
         const restore = async () => {
-            const restoredNodes = await hydrateCanvasImages(resetInterruptedGeneration(project.nodes));
-            const restoredSessions = await hydrateAssistantImages(project.chatSessions || []);
-            setNodes(restoredNodes);
-            setConnections(project.connections);
-            setChatSessions(restoredSessions);
-            setActiveChatId(project.activeChatId || null);
-            setBackgroundMode(project.backgroundMode);
-            setShowImageInfo(project.showImageInfo || false);
-            setCustomStoryTemplates(project.customStoryTemplates || []);
-            setViewport(project.viewport);
-            historyRef.current = { past: [], future: [] };
-            if (historyCommitTimerRef.current) {
-                clearTimeout(historyCommitTimerRef.current);
-                historyCommitTimerRef.current = null;
+            try {
+                const baseNodes = resetInterruptedGeneration(project.nodes || []);
+                const restoredNodes = await hydrateCanvasImages(baseNodes).catch((error) => {
+                    console.warn("Canvas media restore failed; opening with stored metadata", error);
+                    setProjectLoadError("?????????????????????????????????");
+                    return baseNodes;
+                });
+                const restoredSessions = await hydrateAssistantImages(project.chatSessions || []).catch((error) => {
+                    console.warn("Canvas assistant image restore failed; opening without hydrated assistant media", error);
+                    setProjectLoadError("??????????????????");
+                    return project.chatSessions || [];
+                });
+                setNodes(restoredNodes);
+                setConnections(project.connections || []);
+                setChatSessions(restoredSessions);
+                setActiveChatId(project.activeChatId || null);
+                setBackgroundMode(project.backgroundMode || "lines");
+                setShowImageInfo(project.showImageInfo || false);
+                setCustomStoryTemplates(project.customStoryTemplates || []);
+                setViewport(project.viewport || { x: 0, y: 0, k: 1 });
+                historyRef.current = { past: [], future: [] };
+                if (historyCommitTimerRef.current) {
+                    clearTimeout(historyCommitTimerRef.current);
+                    historyCommitTimerRef.current = null;
+                }
+                lastHistoryRef.current = {
+                    nodes: restoredNodes,
+                    connections: project.connections || [],
+                    chatSessions: restoredSessions,
+                    activeChatId: project.activeChatId || null,
+                    backgroundMode: project.backgroundMode || "lines",
+                    showImageInfo: project.showImageInfo || false,
+                };
+                setHistoryState({ canUndo: false, canRedo: false });
+                setProjectLoaded(true);
+            } catch (error) {
+                console.error("Canvas project restore failed", error);
+                setProjectLoadError("????????????????????????????");
+                setProjectMissing(true);
             }
-            lastHistoryRef.current = {
-                nodes: restoredNodes,
-                connections: project.connections,
-                chatSessions: restoredSessions,
-                activeChatId: project.activeChatId || null,
-                backgroundMode: project.backgroundMode,
-                showImageInfo: project.showImageInfo || false,
-            };
-            setHistoryState({ canUndo: false, canRedo: false });
-            setProjectLoaded(true);
         };
         void restore();
-    }, [hydrated, openProject, projectId, router]);
+    }, [hydrated, openProject, projectId]);
 
     useEffect(() => {
         if (!projectLoaded || applyingHistoryRef.current || historyPausedRef.current) return;
@@ -3179,6 +3198,21 @@ function InfiniteCanvasPage() {
         [insertAssistantImage, insertAssistantText, screenToCanvas, size.height, size.width],
     );
 
+    if (projectMissing) {
+        return (
+            <main className="grid h-full place-items-center bg-background px-6 text-center text-stone-950 dark:text-stone-100">
+                <section className="max-w-md rounded-2xl border border-stone-200 bg-white p-6 shadow-sm dark:border-stone-800 dark:bg-stone-900">
+                    <h1 className="text-xl font-semibold">??????</h1>
+                    <p className="mt-3 text-sm leading-6 text-stone-500 dark:text-stone-400">{projectLoadError || "??????????????????????????????????"}</p>
+                    <div className="mt-6 flex justify-center gap-2">
+                        <Button onClick={() => router.push("/canvas")}>?????</Button>
+                        <Button type="primary" onClick={() => window.location.reload()}>????</Button>
+                    </div>
+                </section>
+            </main>
+        );
+    }
+
     if (!projectLoaded) return <CanvasRefreshShell />;
 
     return (
@@ -3873,22 +3907,31 @@ async function resolveMetadataReferences(metadata: CanvasNodeMetadata) {
 async function hydrateCanvasImages(nodes: CanvasNodeData[]) {
     return Promise.all(
         nodes.map(async (node) => {
-            const content = node.metadata?.content;
-            if ((node.type === CanvasNodeType.Video || node.type === CanvasNodeType.Audio) && node.metadata?.storageKey) return { ...node, metadata: { ...node.metadata, content: await resolveMediaUrl(node.metadata.storageKey, content) } };
-            if (node.type !== CanvasNodeType.Image || !content) return node;
-            if (node.metadata?.storageKey) return { ...node, metadata: { ...node.metadata, content: await resolveImageUrl(node.metadata.storageKey, content) } };
-            if (!content.startsWith("data:image/")) return node;
-            return { ...node, metadata: { ...node.metadata, ...imageMetadata(await uploadImage(content)) } };
+            try {
+                const content = node.metadata?.content;
+                if ((node.type === CanvasNodeType.Video || node.type === CanvasNodeType.Audio) && node.metadata?.storageKey) return { ...node, metadata: { ...node.metadata, content: await resolveMediaUrl(node.metadata.storageKey, content) } };
+                if (node.type !== CanvasNodeType.Image || !content) return node;
+                if (node.metadata?.storageKey) return { ...node, metadata: { ...node.metadata, content: await resolveImageUrl(node.metadata.storageKey, content) } };
+                if (!content.startsWith("data:image/")) return node;
+                return { ...node, metadata: { ...node.metadata, ...imageMetadata(await uploadImage(content)) } };
+            } catch (error) {
+                console.warn("Failed to hydrate canvas node media", node.id, error);
+                return node;
+            }
         }),
     );
 }
 
 async function hydrateAssistantImages(sessions: CanvasAssistantSession[]) {
     const hydrateItem = async <T extends { dataUrl?: string; storageKey?: string }>(item: T) => {
-        if (item.storageKey) return { ...item, dataUrl: await resolveImageUrl(item.storageKey, item.dataUrl) };
-        if (item.dataUrl?.startsWith("data:image/")) {
-            const image = await uploadImage(item.dataUrl);
-            return { ...item, dataUrl: image.url, storageKey: image.storageKey };
+        try {
+            if (item.storageKey) return { ...item, dataUrl: await resolveImageUrl(item.storageKey, item.dataUrl) };
+            if (item.dataUrl?.startsWith("data:image/")) {
+                const image = await uploadImage(item.dataUrl);
+                return { ...item, dataUrl: image.url, storageKey: image.storageKey };
+            }
+        } catch (error) {
+            console.warn("Failed to hydrate assistant media", error);
         }
         return item;
     };

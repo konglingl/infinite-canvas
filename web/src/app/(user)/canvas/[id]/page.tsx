@@ -1,5 +1,5 @@
-export const dynamic = "force-dynamic";
-export const revalidate = 0;
+export const dynamic = "force-static";
+export const revalidate = false;
 
 import CanvasClientPage from "./canvas-client-page";
 
