@@ -22,12 +22,13 @@ export function serializeApiParams(params?: ApiParams) {
     return queryParams;
 }
 
-export async function apiGet<T>(url: string, params?: ApiParams, token?: string) {
+export async function apiGet<T>(url: string, params?: ApiParams, token?: string, timeoutMs?: number) {
     return apiRequest<T>({
         url,
         method: "GET",
         params: params || undefined,
         headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+        timeoutMs,
     });
 }
 
@@ -51,7 +52,7 @@ export async function apiDelete<T>(url: string, token?: string) {
     });
 }
 
-async function apiRequest<T>(config: { url: string; method: "GET" | "POST" | "DELETE"; params?: ApiParams; data?: unknown; headers?: Record<string, string> }) {
+async function apiRequest<T>(config: { url: string; method: "GET" | "POST" | "DELETE"; params?: ApiParams; data?: unknown; headers?: Record<string, string>; timeoutMs?: number }) {
     let response;
     try {
         response = await axios.request<ApiResponse<T>>({
@@ -61,6 +62,7 @@ async function apiRequest<T>(config: { url: string; method: "GET" | "POST" | "DE
             paramsSerializer: { serialize: (params) => serializeApiParams(params as ApiParams).toString() },
             data: config.data,
             headers: config.headers,
+            timeout: config.timeoutMs,
             validateStatus: () => true,
         });
     } catch {

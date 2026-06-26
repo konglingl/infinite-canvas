@@ -738,7 +738,6 @@ function InfiniteCanvasPage() {
     const cleanupAssetImages = useAssetStore((state) => state.cleanupImages);
     const hydrated = useCanvasStore((state) => state.hydrated);
     const createProject = useCanvasStore((state) => state.createProject);
-    const openProject = useCanvasStore((state) => state.openProject);
     const updateProject = useCanvasStore((state) => state.updateProject);
     const renameProject = useCanvasStore((state) => state.renameProject);
     const deleteProjects = useCanvasStore((state) => state.deleteProjects);
@@ -801,6 +800,8 @@ function InfiniteCanvasPage() {
     const connectionTargetNodeIdRef = useRef(connectionTargetNodeId);
     const selectionBoxRef = useRef(selectionBox);
     const pendingConnectionCreateRef = useRef(pendingConnectionCreate);
+    const loadedProjectIdRef = useRef<string | null>(null);
+    const loadingProjectIdRef = useRef<string | null>(null);
 
     const createHistoryEntry = useCallback(
         (): CanvasHistoryEntry => ({
@@ -823,28 +824,36 @@ function InfiniteCanvasPage() {
 
     useEffect(() => {
         if (!hydrated) return;
+        if (loadingProjectIdRef.current === projectId) return;
+        if (loadedProjectIdRef.current === projectId && projectLoaded) return;
+
         setProjectLoaded(false);
         setProjectMissing(false);
         setProjectLoadError(null);
-        const project = openProject(projectId);
+
+        const project = currentProject;
         if (!project) {
             setProjectMissing(true);
             return;
         }
+
+        loadingProjectIdRef.current = projectId;
+        let cancelled = false;
 
         const restore = async () => {
             try {
                 const baseNodes = resetInterruptedGeneration(project.nodes || []);
                 const restoredNodes = await hydrateCanvasImages(baseNodes).catch((error) => {
                     console.warn("Canvas media restore failed; opening with stored metadata", error);
-                    setProjectLoadError("?????????????????????????????????");
+                    setProjectLoadError("画布素材恢复失败，将使用当前缓存继续打开");
                     return baseNodes;
                 });
                 const restoredSessions = await hydrateAssistantImages(project.chatSessions || []).catch((error) => {
                     console.warn("Canvas assistant image restore failed; opening without hydrated assistant media", error);
-                    setProjectLoadError("??????????????????");
+                    setProjectLoadError("助手图片恢复失败，将跳过已损坏的附件");
                     return project.chatSessions || [];
                 });
+                if (cancelled) return;
                 setNodes(restoredNodes);
                 setConnections(project.connections || []);
                 setChatSessions(restoredSessions);
@@ -867,15 +876,27 @@ function InfiniteCanvasPage() {
                     showImageInfo: project.showImageInfo || false,
                 };
                 setHistoryState({ canUndo: false, canRedo: false });
+                loadedProjectIdRef.current = projectId;
                 setProjectLoaded(true);
             } catch (error) {
+                if (cancelled) return;
                 console.error("Canvas project restore failed", error);
-                setProjectLoadError("????????????????????????????");
+                setProjectLoadError("画布项目恢复失败，请返回画布库后重新打开");
                 setProjectMissing(true);
+            } finally {
+                if (loadingProjectIdRef.current === projectId) {
+                    loadingProjectIdRef.current = null;
+                }
             }
         };
         void restore();
-    }, [hydrated, openProject, projectId]);
+        return () => {
+            cancelled = true;
+            if (loadingProjectIdRef.current === projectId) {
+                loadingProjectIdRef.current = null;
+            }
+        };
+    }, [currentProject, hydrated, projectId, projectLoaded]);
 
     useEffect(() => {
         if (!projectLoaded || applyingHistoryRef.current || historyPausedRef.current) return;
@@ -3202,11 +3223,11 @@ function InfiniteCanvasPage() {
         return (
             <main className="grid h-full place-items-center bg-background px-6 text-center text-stone-950 dark:text-stone-100">
                 <section className="max-w-md rounded-2xl border border-stone-200 bg-white p-6 shadow-sm dark:border-stone-800 dark:bg-stone-900">
-                    <h1 className="text-xl font-semibold">??????</h1>
-                    <p className="mt-3 text-sm leading-6 text-stone-500 dark:text-stone-400">{projectLoadError || "??????????????????????????????????"}</p>
+                    <h1 className="text-xl font-semibold">画布无法打开</h1>
+                    <p className="mt-3 text-sm leading-6 text-stone-500 dark:text-stone-400">{projectLoadError || "当前画布数据无法恢复，请返回画布库后重新打开"}</p>
                     <div className="mt-6 flex justify-center gap-2">
-                        <Button onClick={() => router.push("/canvas")}>?????</Button>
-                        <Button type="primary" onClick={() => window.location.reload()}>????</Button>
+                        <Button onClick={() => router.push("/canvas")}>返回画布库</Button>
+                        <Button type="primary" onClick={() => window.location.reload()}>重新加载</Button>
                     </div>
                 </section>
             </main>

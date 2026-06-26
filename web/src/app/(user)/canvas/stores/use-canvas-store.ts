@@ -42,62 +42,79 @@ type PersistedCanvasState = Pick<CanvasStore, "projects">;
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
 let queuedPersistState: PersistedCanvasState | null = null;
 let accountCanvasSyncEnabled = false;
+let remoteHydrationTimer: ReturnType<typeof setTimeout> | null = null;
+let remoteHydrationRetryCount = 0;
+const REMOTE_HYDRATION_MAX_RETRIES = 8;
+
+function parsePersistedCanvasState(value: string | null): StorageValue<CanvasStore> | null {
+    if (!value) return null;
+    try {
+        const parsed = JSON.parse(value) as StorageValue<CanvasStore>;
+        const projects = (parsed.state as Partial<PersistedCanvasState> | undefined)?.projects;
+        if (projects !== undefined && !Array.isArray(projects)) return null;
+        return parsed;
+    } catch (error) {
+        console.warn("Failed to parse persisted canvas state", error);
+        return null;
+    }
+}
+
+async function hydrateCanvasStorageFromRemote() {
+    const token = useUserStore.getState().token;
+    if (!token) return;
+
+    try {
+        const userConfig = await fetchUserConfig(token);
+        accountCanvasSyncEnabled = userConfig.syncCapabilities?.userData === true;
+        const remote = userConfig.canvasData as PersistedCanvasState | undefined;
+        const remoteProjects = Array.isArray(remote?.projects) ? remote.projects : [];
+        const remoteHasData = remoteProjects.length > 0;
+
+        const localProjects = useCanvasStore.getState().projects;
+        const localHasData = localProjects.length > 0;
+
+        if (accountCanvasSyncEnabled) {
+            if (remoteHasData && localHasData) {
+                useCanvasStore.setState({ projects: mergeCanvasProjects(remoteProjects, localProjects) });
+            } else if (remoteHasData) {
+                useCanvasStore.setState({ projects: remoteProjects });
+            } else if (localHasData) {
+                void syncUserCanvasData(token, { projects: localProjects }).catch(() => {});
+            }
+            return;
+        }
+
+        if (remoteHasData && !localHasData) {
+            useCanvasStore.setState({ projects: remoteProjects });
+        }
+    } catch (error) {
+        console.error("Failed to hydrate canvas projects from remote", error);
+    }
+}
+
+function scheduleCanvasRemoteHydration(delay = 0) {
+    if (typeof window === "undefined") return;
+    if (remoteHydrationTimer) clearTimeout(remoteHydrationTimer);
+    remoteHydrationTimer = window.setTimeout(() => {
+        remoteHydrationTimer = null;
+        const token = useUserStore.getState().token;
+        if (!token) {
+            if (remoteHydrationRetryCount < REMOTE_HYDRATION_MAX_RETRIES) {
+                remoteHydrationRetryCount += 1;
+                scheduleCanvasRemoteHydration(250);
+            }
+            return;
+        }
+        remoteHydrationRetryCount = 0;
+        void hydrateCanvasStorageFromRemote();
+    }, delay);
+}
 
 const canvasStorage: PersistStorage<CanvasStore> = {
     getItem: async (name) => {
-        const token = useUserStore.getState().token;
         const localValue = await localForageStorage.getItem(name);
-        const localParsed = localValue ? (JSON.parse(localValue) as StorageValue<CanvasStore>) : null;
-        const localProjects = (localParsed?.state as PersistedCanvasState)?.projects || [];
-        const localHasData = Array.isArray(localProjects) && localProjects.length > 0;
-
-        if (token) {
-            try {
-                const userConfig = await fetchUserConfig(token);
-                accountCanvasSyncEnabled = userConfig.syncCapabilities?.userData === true;
-                const remote = userConfig.canvasData as PersistedCanvasState | undefined;
-                const remoteProjects = Array.isArray(remote?.projects) ? remote.projects : [];
-                const remoteHasData = remoteProjects.length > 0;
-
-                if (accountCanvasSyncEnabled) {
-                    if (remoteHasData && localHasData) {
-                        // 1. 本地和云端都有数据，进行智能双向合并
-                        const mergedProjects = mergeCanvasProjects(remoteProjects, localProjects);
-                        const nextState = { projects: mergedProjects };
-                        const parsed = { state: nextState, version: 0 } as StorageValue<CanvasStore>;
-                        queuedPersistState = nextState;
-                        await localForageStorage.setItem(name, JSON.stringify(parsed));
-                        void syncUserCanvasData(token, nextState).catch(() => {});
-                        return parsed;
-                    } else if (remoteHasData) {
-                        // 2. 只有云端有数据，覆盖本地
-                        const parsed = { state: remote, version: 0 } as StorageValue<CanvasStore>;
-                        queuedPersistState = remote || null;
-                        await localForageStorage.setItem(name, JSON.stringify(parsed));
-                        return parsed;
-                    } else if (localHasData) {
-                        // 3. 只有本地有数据，同步推送给云端
-                        const nextState = { projects: localProjects };
-                        void syncUserCanvasData(token, nextState).catch(() => {});
-                    }
-                } else {
-                    // 未开启同步，但本地为空且云端有数据时，执行一次单向回填
-                    if (remoteHasData && !localHasData) {
-                        const parsed = { state: remote, version: 0 } as StorageValue<CanvasStore>;
-                        queuedPersistState = remote || null;
-                        await localForageStorage.setItem(name, JSON.stringify(parsed));
-                        return parsed;
-                    }
-                }
-            } catch (e) {
-                console.error("Failed to hydrate canvas projects from remote", e);
-            }
-        }
-        if (!localParsed) return null;
-        queuedPersistState = localParsed.state as PersistedCanvasState;
-        if (token && accountCanvasSyncEnabled && Array.isArray((localParsed.state as PersistedCanvasState).projects)) {
-            void syncUserCanvasData(token, localParsed.state as PersistedCanvasState).catch(() => {});
-        }
+        const localParsed = parsePersistedCanvasState(localValue);
+        queuedPersistState = (localParsed?.state as PersistedCanvasState) || null;
         return localParsed;
     },
     setItem: (name, value) => {
@@ -213,6 +230,7 @@ export const useCanvasStore = create<CanvasStore>()(
                 }) as StorageValue<CanvasStore>["state"],
             onRehydrateStorage: () => () => {
                 useCanvasStore.setState({ hydrated: true });
+                scheduleCanvasRemoteHydration();
             },
         },
     ),
